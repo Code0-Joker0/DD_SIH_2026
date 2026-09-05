@@ -1,0 +1,34 @@
+# Python virtual environments
+**/.venv/
+
+# Python cache
+**/__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment / secrets
+.env
+**/.env
+
+# Hugging Face / ML caches
+**/.cache/
+**/models/
+**/hf_cache/
+
+# Qdrant local data
+**/qdrant_storage/
+
+# Temporary files
+temp_files/
+**/temp_files/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
