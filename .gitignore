@@ -1,1 +1,15 @@
 .git
+.env
+.env.dev
+.env.server
+scripts/*.pid
+/data/
+*.log
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+hello.txt
+explain.txt
+# temp.txt
+
