@@ -19,6 +19,7 @@ import {
   Info
 } from 'lucide-react';
 import { INITIAL_SOURCE_FILES } from '../data/chatStore';
+import { executeAgentTask } from '../utils/api';
 
 const SUGGESTION_CHIPS = [
   'Analyze',
@@ -473,7 +474,18 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                                 </div>
 
                                 <div className="file-card-actions font-mono">
-                                  <button className="icon-action-btn primary" title="Download">
+                                  <button
+                                    type="button"
+                                    className="icon-action-btn primary"
+                                    title="Download Deliverable Note"
+                                    onClick={async () => {
+                                      try {
+                                        await executeAgentTask(activeChat?.title || 'Perform integrity assessment');
+                                      } catch (err) {
+                                        alert('Download failed: ' + err.message);
+                                      }
+                                    }}
+                                  >
                                     <Download size={13} />
                                     <span>Download</span>
                                   </button>
