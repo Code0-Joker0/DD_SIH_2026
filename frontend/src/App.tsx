@@ -284,24 +284,21 @@ export default function App() {
     // Prepend to KB sources
     setKbSources((prev) => [newSource, ...prev.filter(s => s.name !== uploadedFile.name)]);
 
-    // Dispatch to Vector Store Upload API
+    // Dispatch to Ingestion API
     try {
       const formData = new FormData();
       formData.append('file', uploadedFile);
-      formData.append('prompt', 'Ingest and index inspection document into ChromaDB vector store');
+      formData.append('equipment_tag', 'E-101');
+      formData.append('category', formattedType);
 
-      fetch('http://localhost:3000/api/knowledge/upload', {
+      fetch('http://localhost:3000/api/documents/upload', {
         method: 'POST',
         body: formData,
-      }).catch(() => {
-        fetch('http://127.0.0.1:5000/api/tasks/run', {
-          method: 'POST',
-          body: formData,
-        }).catch(() => {});
-      });
+      }).catch(() => {});
     } catch {
       // Background sync
     }
+
   };
 
   // Handle File Selection on Dashboard & Auto-Sync
@@ -341,7 +338,7 @@ export default function App() {
     });
   };
 
-  // Autonomous Swarm Pipeline Execution (SSE Stream)
+  // Single-Agent Pipeline Task Execution -> Download Approval_Note.docx
   const handleRun = async () => {
     setIsRunning(true);
     setLogs([]);
@@ -350,120 +347,58 @@ export default function App() {
     resetPipelineSteps();
 
     const formData = new FormData();
-    formData.append('prompt', prompt);
+    formData.append('task_prompt', prompt);
     if (file) formData.append('file', file);
 
     const timestamp = new Date().toLocaleTimeString();
-    setLogs((prev) => [...prev, `[${timestamp}] [INIT] Initiating Sovereign Execution pipeline...`]);
+    setLogs((prev) => [...prev, `[${timestamp}] [INIT] Initiating Single LangGraph Agent task execution...`]);
+    updateStepStatus(0, 'running', 'Ingesting document and validating parameters...');
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/tasks/run', {
+      const response = await fetch('http://localhost:3000/api/tasks/execute', {
         method: 'POST',
         body: formData,
       });
 
-      if (!response.body) {
-        throw new Error('ReadableStream not supported on this browser.');
+      if (!response.ok) {
+        throw new Error(`Task execution failed with status ${response.status}`);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
+      updateStepStatus(0, 'completed', 'Domain validated.');
+      updateStepStatus(1, 'completed', 'Integrity calculations & statutory RAG verified.');
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Stream binary blob and trigger direct download
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = 'Approval_Note.docx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
 
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
+      updateStepStatus(2, 'completed', 'Approval Note (.docx) compiled and downloaded.');
 
-        for (const part of parts) {
-          const lines = part.split('\n');
-          const eventLine = lines.find((l) => l.startsWith('event:'));
-          const dataLine = lines.find((l) => l.startsWith('data:'));
+      const evTime = new Date().toLocaleTimeString();
+      setLogs((prev) => [
+        ...prev,
+        `[${evTime}] [SUCCESS] Single Agent execution complete. Approval_Note.docx downloaded.`
+      ]);
 
-          if (eventLine && dataLine) {
-            const eventType = eventLine.replace('event: ', '').trim();
-            const dataStr = dataLine.replace('data: ', '').trim();
-
-            if (dataStr) {
-              try {
-                const data = JSON.parse(dataStr);
-                const evTime = new Date().toLocaleTimeString();
-
-                if (eventType === 'step') {
-                  const sIdx = Number(data.step_index) || 1;
-                  const statusLower = String(data.status || '').toLowerCase();
-                  const uiIdx = sIdx <= 2 ? 0 : sIdx <= 5 ? 1 : 2;
-
-                  if (statusLower === 'rejected' || statusLower === 'failed') {
-                    updateStepStatus(uiIdx, statusLower === 'rejected' ? 'rejected' : 'failed', data.message);
-                    if (statusLower === 'rejected') {
-                      setValidationAlert(data.message || 'Uploaded file is not a valid refinery inspection sheet or P&ID. Please upload an ultrasonic test report or equipment scan.');
-                    }
-                    setIsRunning(false);
-                  } else {
-                    if (data.status === 'RUNNING') {
-                      updateStepStatus(uiIdx, 'running', data.message);
-                    } else if (data.status === 'COMPLETED') {
-                      if (sIdx === 2 || sIdx === 5 || sIdx === 7) {
-                        updateStepStatus(uiIdx, 'completed', data.message);
-                      } else {
-                        updateStepStatus(uiIdx, 'running', data.message);
-                      }
-                    }
-                  }
-                } else if (eventType === 'log') {
-                  setLogs((prev) => [...prev, `[${evTime}] ${data.log}`]);
-                } else if (eventType === 'artifact') {
-                  setArtifact({
-                    filename: data.filename,
-                    download_url: `http://127.0.0.1:5000${data.download_url}`,
-                    file_size: data.file_size
-                  });
-                } else if (eventType === 'complete') {
-                  const compStatus = String(data.status || '').toLowerCase();
-                  if (compStatus === 'rejected' || compStatus === 'validation_rejected') {
-                    const errMsg = data.reason || 'Uploaded file is not a valid refinery inspection sheet or P&ID. Please upload an ultrasonic test report or equipment scan.';
-                    updateStepStatus(0, 'rejected', errMsg);
-                    setValidationAlert(errMsg);
-                    setLogs((prev) => [
-                      ...prev,
-                      `[${evTime}] [VALIDATION_REJECTED] ${errMsg}`
-                    ]);
-                    setIsRunning(false);
-                  } else {
-                    setLogs((prev) => [
-                      ...prev,
-                      `[${evTime}] [SUCCESS] Autonomous Swarm execution complete (${data.status}). Deliverable verified.`
-                    ]);
-                    if (data.extracted_data) {
-                      setArtifact((prev) =>
-                        prev ? { ...prev, extracted_metrics: data.extracted_data } : {
-                          filename: 'MRPL_Approval_Note.docx',
-                          download_url: 'http://127.0.0.1:5000/api/download/MRPL_Approval_Note.docx',
-                          extracted_metrics: data.extracted_data
-                        }
-                      );
-                    }
-                    setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' })));
-                    setIsRunning(false);
-                  }
-                }
-              } catch (e) {
-                console.error('Failed to parse SSE JSON', e);
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
+      setArtifact({
+        filename: 'Approval_Note.docx',
+        download_url: 'http://localhost:3000/api/download/Approval_Note.docx'
+      });
+      setIsRunning(false);
+    } catch (error: any) {
       const errTime = new Date().toLocaleTimeString();
-      setLogs((prev) => [...prev, `[${errTime}] [ERROR] Pipeline failure: ${error}`]);
+      setLogs((prev) => [...prev, `[${errTime}] [ERROR] Task execution error: ${error?.message || error}`]);
+      updateStepStatus(2, 'failed', error?.message || 'Execution error');
       setIsRunning(false);
     }
   };
+
 
   // Dynamic Grounding Context Builder from Checked Sources & Active File
   const getActiveDocumentContext = () => {
@@ -541,6 +476,7 @@ export default function App() {
           body: JSON.stringify({
             session_id: chatSessionId,
             message: textToSend,
+            selected_doc_ids: kbSources.filter(s => s.checked).map(s => s.id),
             history: historyPayload,
             context: docContext,
             document_context: docContext,
@@ -553,19 +489,21 @@ export default function App() {
         // Gateway unreachable, fallback to python engine
       }
 
-      // 2. Fallback to Local Python Engine on http://127.0.0.1:5000/api/chat
+      // 2. Fallback to Local Python Engine on http://127.0.0.1:8000/api/chat
       if (!data) {
-        const pythonRes = await fetch('http://127.0.0.1:5000/api/chat', {
+        const pythonRes = await fetch('http://127.0.0.1:8000/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             session_id: chatSessionId,
             message: textToSend,
+            selected_doc_ids: kbSources.filter(s => s.checked).map(s => s.id),
             history: historyPayload,
             document_context: docContext,
             context: docContext,
           }),
         });
+
 
         if (!pythonRes.ok) {
           throw new Error(`Chat API returned status ${pythonRes.status}`);

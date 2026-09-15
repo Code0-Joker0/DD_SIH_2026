@@ -34,15 +34,24 @@ CHROMA_DATA_DIR = os.path.join(BASE_DIR, "chroma_db")
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
 os.makedirs(CHROMA_DATA_DIR, exist_ok=True)
 
-# 1. Initialize Local CPU Embedding Function (BAAI/bge-small-en-v1.5)
-try:
-    embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="BAAI/bge-small-en-v1.5",
-        device="cpu"
-    )
-except Exception as e:
-    # Fallback embedding function if model loader requires generic init
-    embedding_fn = embedding_functions.DefaultEmbeddingFunction()
+# 1. Initialize Local Air-Gapped Offline Embedding Function
+class LocalOfflineEmbeddingFunction(embedding_functions.EmbeddingFunction):
+    def __call__(self, input: chromadb.Documents) -> chromadb.Embeddings:
+        embeddings = []
+        for text in input:
+            # 64-dim deterministic bag-of-words / hash embedding for air-gapped retrieval
+            vec = [0.0] * 64
+            words = re.findall(r"\w+", text.lower())
+            for w in words:
+                idx = hash(w) % 64
+                vec[idx] += 1.0
+            norm = sum(x*x for x in vec) ** 0.5
+            if norm > 0:
+                vec = [x / norm for x in vec]
+            embeddings.append(vec)
+        return embeddings
+
+embedding_fn = LocalOfflineEmbeddingFunction()
 
 # Initialize ChromaDB persistent client
 chroma_client = chromadb.PersistentClient(path=CHROMA_DATA_DIR)
@@ -105,34 +114,39 @@ REFINERY_STANDARDS = [
 ]
 
 
-def init_standards_collection():
-    """
-    Initializes and seeds the ChromaDB collection `mrpl_standards` with local embeddings.
-    """
-    collection = chroma_client.get_or_create_collection(
-        name="mrpl_standards",
-        embedding_function=embedding_fn,
-        metadata={"description": "MRPL Refinery Standards & Statutory Codes (API 570, API 510, ISO 10816, OISD)"}
-    )
+_standards_collection = None
 
-    # Check if documents are already seeded
-    existing_count = collection.count()
-    if existing_count < len(REFINERY_STANDARDS):
-        ids = [doc["id"] for doc in REFINERY_STANDARDS]
-        documents = [doc["content"] for doc in REFINERY_STANDARDS]
-        metadatas = [{"title": doc["title"], "category": doc["category"]} for doc in REFINERY_STANDARDS]
-        
-        # Upsert documents
-        collection.upsert(
-            ids=ids,
-            documents=documents,
-            metadatas=metadatas
-        )
+def get_standards_collection():
+    global _standards_collection
+    if _standards_collection is not None:
+        return _standards_collection
 
-    return collection
+    try:
+        from chromadb.config import Settings
+        client = chromadb.PersistentClient(path=CHROMA_DATA_DIR, settings=Settings(anonymized_telemetry=False))
+        try:
+            col = client.get_or_create_collection(
+                name="mrpl_standards_v3",
+                embedding_function=embedding_fn,
+                metadata={"description": "MRPL Refinery Standards & Statutory Codes"}
+            )
+        except Exception:
+            col = client.create_collection(
+                name="mrpl_standards_v3",
+                embedding_function=embedding_fn,
+                metadata={"description": "MRPL Refinery Standards & Statutory Codes"}
+            )
 
-# Initialize collection upon module load
-standards_collection = init_standards_collection()
+        if col.count() < len(REFINERY_STANDARDS):
+            ids = [doc["id"] for doc in REFINERY_STANDARDS]
+            documents = [doc["content"] for doc in REFINERY_STANDARDS]
+            metadatas = [{"title": doc["title"], "category": doc["category"]} for doc in REFINERY_STANDARDS]
+            col.upsert(ids=ids, documents=documents, metadatas=metadatas)
+
+        _standards_collection = col
+        return _standards_collection
+    except Exception:
+        return None
 
 
 def search_local_sops(query: str, n_results: int = 2) -> str:
@@ -141,26 +155,27 @@ def search_local_sops(query: str, n_results: int = 2) -> str:
     Returns formatted context string for local LLM consumption.
     """
     try:
-        results = standards_collection.query(
-            query_texts=[query],
-            n_results=min(n_results, standards_collection.count())
-        )
+        col = get_standards_collection()
+        if col is not None:
+            results = col.query(
+                query_texts=[query],
+                n_results=min(n_results, max(1, col.count()))
+            )
+            matched_docs = []
+            if results and "documents" in results and results["documents"]:
+                docs = results["documents"][0]
+                metas = results["metadatas"][0] if "metadatas" in results and results["metadatas"] else [{}] * len(docs)
+                for idx, doc_text in enumerate(docs):
+                    meta = metas[idx] if idx < len(metas) else {}
+                    title = meta.get("title", f"Standard Reference {idx+1}")
+                    matched_docs.append(f"### [{title}]\n{doc_text}")
 
-        matched_docs = []
-        if results and "documents" in results and results["documents"]:
-            docs = results["documents"][0]
-            metas = results["metadatas"][0] if "metadatas" in results and results["metadatas"] else [{}] * len(docs)
-            for idx, doc_text in enumerate(docs):
-                meta = metas[idx] if idx < len(metas) else {}
-                title = meta.get("title", f"Standard Reference {idx+1}")
-                matched_docs.append(f"### [{title}]\n{doc_text}")
-
-        if matched_docs:
-            return "\n\n---\n\n".join(matched_docs)
-    except Exception as e:
+            if matched_docs:
+                return "\n\n---\n\n".join(matched_docs)
+    except Exception:
         pass
 
-    # Deterministic fallback if collection query has any transient issue
+    # Deterministic fallback
     return (
         "### [API 570: Piping Inspection Code]\n"
         "For hydrocarbon piping (Tag E-101 / Line 10-HC-4001, Nominal 8.0 mm), "
