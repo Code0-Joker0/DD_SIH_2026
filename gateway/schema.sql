@@ -4,8 +4,8 @@
 -- Encryption: AES-256-GCM with per-file unique IV, Auth Tag, and SHA-256 Checksum
 -- ============================================================================
 
--- Ensure pgcrypto extension is available for UUID generation
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- Ensure pgcrypto extension is available for UUID generation (Native in PGlite)
+-- CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ----------------------------------------------------------------------------
 -- 1. Users Table (Enterprise Personnel & Authentication)

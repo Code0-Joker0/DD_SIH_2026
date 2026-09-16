@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS company_files (
     mime_type VARCHAR(120) NOT NULL,             -- MIME type (e.g. application/pdf)
     file_size BIGINT NOT NULL,                   -- Original unencrypted size in bytes
     encrypted_size BIGINT NOT NULL,             -- Ciphertext size in bytes
-    encrypted_data BUFFER NOT NULL,               -- AES-256-GCM encrypted binary file payload
+    encrypted_data BYTEA NOT NULL,               -- AES-256-GCM encrypted binary file payload
     encryption_algorithm VARCHAR(50) NOT NULL DEFAULT 'aes-256-gcm',
     encryption_iv VARCHAR(64) NOT NULL,          -- Hex-encoded 96-bit Initialization Vector
     encryption_auth_tag VARCHAR(64) NOT NULL,    -- Hex-encoded 128-bit GCM Authentication Tag

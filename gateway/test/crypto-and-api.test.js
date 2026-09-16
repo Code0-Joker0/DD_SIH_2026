@@ -78,7 +78,7 @@ async function runTests() {
   await db.initDatabase();
 
   const userRes = await db.query(
-    'INSERT INTO users (username, email, password_hash, full_name, role, department) VALUES ($1, $2, $3, $4, $5, $6)',
+    'INSERT INTO users (username, email, password_hash, full_name, role, department) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
     ['test_engineer', 'engineer@mrpl.local', 'hashed_pass_placeholder', 'MRPL Inspector', 'engineer', 'Inspection']
   );
   assert(userRes.rows && userRes.rows.length > 0, 'Must return inserted user');
