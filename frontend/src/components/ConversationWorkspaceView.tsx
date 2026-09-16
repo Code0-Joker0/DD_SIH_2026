@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Paperclip, 
+  Play, 
   ChevronDown, 
   FileText, 
   FileSpreadsheet, 
@@ -8,9 +9,10 @@ import {
   X, 
   BookOpen, 
   CheckSquare, 
-  Square,
-  AlertCircle,
-  Info
+  Square, 
+  AlertCircle, 
+  Sparkles, 
+  Info 
 } from 'lucide-react';
 import { INITIAL_SOURCE_FILES } from '../data/chatStore';
 import { executeAgentTask } from '../utils/api';
@@ -274,21 +276,23 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage }:
         </div>
       )}
 
-      {/* Main Composer Box */}
+      {/* Main Composer Box with Subtle Neon-Blue Hover & Focus Glow */}
       <div className="composer-box">
-        <textarea
-          className="composer-textarea font-sans"
-          placeholder="Ask a question or upload files..."
-          value={promptInput}
-          onChange={(e) => setPromptInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleFormSubmit(e);
-            }
-          }}
-          rows={isCenteredState ? 3 : 2}
-        />
+        <div className="composer-input-wrapper">
+          <textarea
+            className="composer-textarea font-sans"
+            placeholder={isCenteredState ? "Ask questions, paste specs, or run engineering calculations..." : "Reply to Singularity..."}
+            value={promptInput}
+            onChange={(e) => setPromptInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleFormSubmit(e);
+              }
+            }}
+            rows={isCenteredState ? 3 : 2}
+          />
+        </div>
 
         {/* Toolbar inside composer box */}
         <div className="composer-toolbar">
@@ -315,64 +319,60 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage }:
             {/* Source Selection Button */}
             <button 
               type="button" 
-              className={`composer-btn ${knowledgeScope === 'selected' && selectedSourceIds.length > 0 ? 'active-scope' : ''}`}
+              className={`composer-btn font-mono ${knowledgeScope === 'selected' && selectedSourceIds.length > 0 ? 'active-scope' : ''}`}
               onClick={() => setIsSourceModalOpen(true)}
-              title="Configure Sources"
+              title="Select Sources"
             >
               <BookOpen size={14} />
               <span>
                 {knowledgeScope === 'selected' 
-                  ? `${selectedSourceIds.length} Source${selectedSourceIds.length === 1 ? '' : 's'}`
+                  ? `${selectedSourceIds.length} Sources` 
                   : knowledgeScope === 'all' 
                     ? 'All Sources' 
                     : 'Chat Only'
                 }
               </span>
             </button>
+          </div>
 
-            {/* AI Capability Mode Picker */}
+          <div className="composer-toolbar-right font-mono">
+            {/* AI Mode Selector Dropdown */}
             <div className="ai-mode-picker-wrapper">
-              <button 
-                type="button" 
-                className="composer-btn mode-btn"
+              <button
+                type="button"
+                className="ai-mode-picker-trigger font-mono"
                 onClick={() => setIsAiModeOpen(!isAiModeOpen)}
-                title="Select AI Mode"
               >
                 <span>{currentModeObj?.label}</span>
-                <ChevronDown size={13} className={`chevron-transition ${isAiModeOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown size={13} />
               </button>
 
               {isAiModeOpen && (
-                <div className="ai-mode-dropdown-menu font-sans">
-                  <div className="dropdown-header font-mono">Select Processing Mode</div>
+                <div className="ai-mode-picker-menu">
                   {AI_MODES.map((mode) => (
-                    <div 
-                      key={mode.id} 
-                      className={`mode-option-item ${selectedAiMode === mode.id ? 'selected' : ''}`}
+                    <div
+                      key={mode.id}
+                      className={`mode-picker-item ${selectedAiMode === mode.id ? 'active' : ''}`}
                       onClick={() => {
                         setSelectedAiMode(mode.id);
                         setIsAiModeOpen(false);
                       }}
                     >
-                      <div className="mode-text-block">
-                        <span className="mode-label">{mode.label}</span>
-                        <span className="mode-desc font-mono">{mode.desc}</span>
-                      </div>
+                      <span className="mode-item-title font-sans">{mode.label}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </div>
 
-          <div className="composer-toolbar-right">
+            {/* Send Button */}
             <button 
               type="submit" 
-              className="composer-send-btn" 
+              className="composer-send-btn font-mono"
               disabled={!promptInput.trim() && attachedFiles.length === 0}
-              title="Send Message"
             >
-              <span>Run</span>
+              <Play size={13} fill="currentColor" />
+              <span>Send</span>
             </button>
           </div>
         </div>
@@ -381,59 +381,75 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage }:
   );
 
   return (
-    <div className="conversation-workspace-container font-sans">
+    <div className="chat-workspace-container font-sans">
       
-      {/* 1. HERO EMPTY STATE (When no messages exist) */}
+      {/* 1. EMPTY CHAT STATE (CENTERED COMPOSER) */}
       {isChatEmpty ? (
-        <div className="workspace-hero-state">
-          <div className="hero-content-box">
-            <h1 className="hero-headline font-sans">
-              What would you like to solve today?
-            </h1>
-            <p className="hero-subtext font-mono">
+        <div className="centered-chat-workspace font-sans">
+          <div className="empty-welcome-header">
+            <div className="empty-sparkle-badge">
+              <Sparkles size={24} className="icon-blue" />
+            </div>
+            <h1 className="empty-welcome-heading font-sans">What would you like to work on?</h1>
+            <p className="empty-welcome-subtext font-mono">
               Ask about engineering specs, analyze equipment reports, calculate integrity metrics, or generate official approval notes.
             </p>
+          </div>
 
-            {/* Centered Composer Form */}
-            <div className="hero-composer-wrapper">
-              {renderComposerForm(true)}
-            </div>
+          {/* Large Centered Composer Box with Subtle Neon Glow */}
+          <div className="centered-composer-container">
+            {renderComposerForm(true)}
+          </div>
 
-            {/* Suggestion Chips */}
-            <div className="suggestion-chips-wrapper">
-              <span className="chips-label font-mono">Quick Suggestions:</span>
-              <div className="chips-row">
-                {SUGGESTION_CHIPS.map((chip, idx) => (
-                  <button 
-                    key={idx} 
-                    type="button" 
-                    className="suggestion-chip-btn font-mono"
-                    onClick={() => handleChipClick(chip)}
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
+          {/* Shortcut Chips Below Centered Composer */}
+          <div className="centered-shortcuts-row font-mono">
+            <div className="chips-scroll">
+              {SUGGESTION_CHIPS.map((chip) => (
+                <button
+                  type="button"
+                  key={chip}
+                  className="shortcut-chip-btn"
+                  onClick={() => handleChipClick(chip)}
+                >
+                  {chip}
+                </button>
+              ))}
             </div>
           </div>
         </div>
       ) : (
-        /* 2. ACTIVE CONVERSATION THREAD */
+        /* 2. ACTIVE CHAT STATE (SCROLLABLE MESSAGES + BOTTOM COMPOSER) */
         <>
-          {/* Header with Title and Mode */}
-          <header className="chat-thread-header font-sans">
-            <div className="header-left">
-              <h2 className="chat-thread-title font-sans">
-                {activeChat?.title || 'Active Conversation'}
-              </h2>
-            </div>
-
-            <div className="header-right font-mono">
-              <div className="thread-meta-pill">
-                <span>Mode: {activeChat?.aiMode || 'Auto'}</span>
-              </div>
-              <div className="thread-meta-pill">
-                <span>Scope: {activeChat?.knowledgeScope || 'Selected Sources'}</span>
+          {/* Top Conversation Header */}
+          <header className="chat-topbar font-sans">
+            <div className="chat-topbar-left">
+              <h2 className="chat-topbar-title">{activeChat?.title || 'New Conversation'}</h2>
+              <div className="chat-topbar-tags font-mono">
+                {knowledgeScope === 'selected' && (
+                  <button 
+                    type="button" 
+                    className="source-scope-badge"
+                    onClick={() => setIsSourceModalOpen(true)}
+                  >
+                    <BookOpen size={12} />
+                    <span>{selectedSourceIds.length} Sources</span>
+                  </button>
+                )}
+                {knowledgeScope === 'all' && (
+                  <span className="source-scope-badge muted">
+                    <BookOpen size={12} />
+                    <span>All Sources</span>
+                  </span>
+                )}
+                {knowledgeScope === 'current' && (
+                  <span className="source-scope-badge amber">
+                    <Info size={12} />
+                    <span>Chat Only</span>
+                  </span>
+                )}
+                {activeChat?.aiMode && (
+                  <span className="mode-tag font-mono">[{activeChat.aiMode}]</span>
+                )}
               </div>
             </div>
           </header>
@@ -525,8 +541,8 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage }:
                             {msg.taskRun.generatedFiles.map((file, gIdx) => (
                               <div key={gIdx} className="generated-file-card">
                                 <div className="file-card-left">
-                                  <div className={`file-icon-box ${file.name.endsWith('.xlsx') ? 'xlsx-bg' : 'pdf-bg'}`}>
-                                    {file.name.endsWith('.xlsx') ? (
+                                  <div className={`file-icon-box ${file.name?.endsWith('.xlsx') ? 'xlsx-bg' : 'pdf-bg'}`}>
+                                    {file.name?.endsWith('.xlsx') ? (
                                       <FileSpreadsheet size={18} style={{ color: 'var(--accent-green)' }} />
                                     ) : (
                                       <FileText size={18} style={{ color: 'var(--accent-red)' }} />
@@ -561,24 +577,24 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage }:
                         </div>
                       )}
 
-                      {/* 6. TECHNICAL DETAILS TOGGLE */}
+                      {/* 6. TECHNICAL DETAILS ACCORDION */}
                       {msg.taskRun?.technicalDetails && (
                         <div className="ai-tech-details-section">
                           <button
                             type="button"
-                            className="tech-details-toggle font-mono"
+                            className="tech-accordion-trigger font-mono"
                             onClick={() => toggleExecutionDetails(msg.id)}
                           >
                             <Info size={13} />
-                            <span>{openExecutionDetailsMap[msg.id] ? 'Hide Details' : 'Technical Details'}</span>
+                            <span>{openExecutionDetailsMap[msg.id] ? 'Hide Technical Details' : 'View Technical Details'}</span>
                           </button>
 
                           {openExecutionDetailsMap[msg.id] && (
                             <div className="tech-details-content font-mono">
                               {Object.entries(msg.taskRun.technicalDetails).map(([key, val]) => (
                                 <div key={key} className="tech-detail-row">
-                                  <span className="detail-key">{key}:</span>
-                                  <span className="detail-val">{String(val)}</span>
+                                  <span className="tech-label">{key}:</span>
+                                  <span className="tech-value">{String(val)}</span>
                                 </div>
                               ))}
                             </div>
