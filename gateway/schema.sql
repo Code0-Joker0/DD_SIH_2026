@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS company_files (
     encryption_iv VARCHAR(64) NOT NULL,          -- Hex-encoded 96-bit Initialization Vector
     encryption_auth_tag VARCHAR(64) NOT NULL,    -- Hex-encoded 128-bit GCM Authentication Tag
     checksum_sha256 VARCHAR(64) NOT NULL,        -- SHA-256 integrity hash of original content
+    -- Post-Quantum KEM envelope (ML-KEM-768 / FIPS 203)
+    kem_wrapped_dek    TEXT,                      -- Hex-encoded DEK XOR'd with KEM shared secret (32 bytes)
+    kem_cipher_text    TEXT,                      -- Hex-encoded ML-KEM-768 ciphertext (1088 bytes)
+    kem_public_key     TEXT,                      -- Hex-encoded ML-KEM-768 public key used for this file
     uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
     department VARCHAR(100) NOT NULL DEFAULT 'General',
     category VARCHAR(50) NOT NULL DEFAULT 'Document'

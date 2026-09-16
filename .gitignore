@@ -41,6 +41,10 @@ chroma_db/
 **/chroma_db/
 *.db
 *.sqlite3
+gateway/data/
+
+# Post-Quantum KEM keypair (ML-KEM-768) — NEVER commit secret keys
+**/kem-keypair.json
 
 # Uploads, Temporary & Output Artifacts
 uploads/

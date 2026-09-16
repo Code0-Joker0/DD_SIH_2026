@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import db from '../db/index.js';
-import { encryptBuffer, decryptBuffer } from '../utils/fileCrypto.js';
+import { encryptBuffer, decryptBuffer, encryptBufferPQ, decryptBufferPQ } from '../utils/fileCrypto.js';
 import { authenticateToken, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -59,8 +59,8 @@ router.post('/upload', optionalAuth, upload.single('file'), async (req, res) => 
     const category = req.body.category || getCategoryFromMime(originalname, mimetype);
     const isCompanyWide = req.body.isCompanyWide !== 'false';
 
-    // 1. Perform Hardware-Accelerated AES-256-GCM Encryption with SHA-256 Checksum
-    const encryptionResult = encryptBuffer(buffer);
+    // 1. Perform AES-256-GCM Encryption with ML-KEM-768 Post-Quantum Key Wrapping
+    const encryptionResult = encryptBufferPQ(buffer);
 
     const safeFilename = `${Date.now()}_${originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
@@ -69,9 +69,10 @@ router.post('/upload', optionalAuth, upload.single('file'), async (req, res) => 
       INSERT INTO company_files (
         filename, original_name, mime_type, file_size, encrypted_size,
         encrypted_data, encryption_algorithm, encryption_iv, encryption_auth_tag,
-        checksum_sha256, uploaded_by, department, category, status, is_company_wide, metadata
+        checksum_sha256, kem_wrapped_dek, kem_cipher_text, kem_public_key,
+        uploaded_by, department, category, status, is_company_wide, metadata
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING id, filename, original_name, mime_type, file_size, encrypted_size,
                 encryption_algorithm, checksum_sha256, department, category, status,
                 is_company_wide, created_at;
@@ -88,6 +89,9 @@ router.post('/upload', optionalAuth, upload.single('file'), async (req, res) => 
       encryptionResult.iv,
       encryptionResult.authTag,
       encryptionResult.checksum,
+      encryptionResult.wrappedDek,
+      encryptionResult.kemCipherText,
+      encryptionResult.kemPublicKey,
       user.id,
       department,
       category,
@@ -118,7 +122,7 @@ router.post('/upload', optionalAuth, upload.single('file'), async (req, res) => 
 
     return res.status(201).json({
       status: 'success',
-      message: 'File successfully encrypted (AES-256-GCM) and committed to PostgreSQL database',
+      message: 'File encrypted (AES-256-GCM + ML-KEM-768) and committed to PostgreSQL database',
       file: {
         ...savedFile,
         formattedSize: formatBytes(savedFile.file_size),
@@ -149,6 +153,7 @@ router.get('/', optionalAuth, async (req, res) => {
       SELECT f.id, f.filename, f.original_name, f.mime_type, f.file_size, f.encrypted_size,
              f.encryption_algorithm, f.checksum_sha256, f.department, f.category, f.status,
              f.is_company_wide, f.metadata, f.created_at, f.updated_at,
+             f.kem_wrapped_dek,
              u.full_name as uploader_name, u.email as uploader_email
       FROM company_files f
       LEFT JOIN users u ON f.uploaded_by = u.id
@@ -191,7 +196,8 @@ router.get('/', optionalAuth, async (req, res) => {
       }),
       createdAt: f.created_at,
       status: f.status,
-      encryption: 'AES-256-GCM',
+      encryption: f.encryption_algorithm || 'aes-256-gcm',
+      pqProtected: !!f.kem_wrapped_dek,
       department: f.department,
       uploader: f.uploader_name || 'Enterprise Personnel'
     }));
@@ -240,7 +246,7 @@ router.get('/stats/summary', async (req, res) => {
         totalStorage: formatBytes(totalBytes),
         totalEncryptedStorage: formatBytes(totalEncryptedBytes),
         categoryCounts,
-        securityProtocol: 'AES-256-GCM + SHA-256'
+        securityProtocol: 'AES-256-GCM + ML-KEM-768 + SHA-256'
       }
     });
   } catch (error) {
@@ -287,7 +293,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
 /**
  * GET /api/files/:id/download
- * Decrypt file with AES-256-GCM, verify SHA-256 checksum, and stream to client
+ * Decrypt file (PQ-wrapped or legacy), verify SHA-256 checksum, and stream to client
  */
 router.get('/:id/download', optionalAuth, async (req, res) => {
   try {
@@ -295,7 +301,8 @@ router.get('/:id/download', optionalAuth, async (req, res) => {
 
     const result = await db.query(
       `SELECT id, original_name, mime_type, file_size, encrypted_data,
-              encryption_iv, encryption_auth_tag, checksum_sha256, status
+              encryption_iv, encryption_auth_tag, checksum_sha256, status,
+              kem_wrapped_dek, kem_cipher_text
        FROM company_files
        WHERE id = $1`,
       [id]
@@ -310,12 +317,30 @@ router.get('/:id/download', optionalAuth, async (req, res) => {
 
     const file = result.rows[0];
 
-    const decryptedBuffer = decryptBuffer(
-      file.encrypted_data,
-      file.encryption_iv,
-      file.encryption_auth_tag,
-      file.checksum_sha256
-    );
+    // Branch: PQ-wrapped (ML-KEM-768) or legacy (master key) decryption
+    let decryptedBuffer;
+    let pqProtected = false;
+
+    if (file.kem_wrapped_dek && file.kem_cipher_text) {
+      // Post-Quantum path: unwrap DEK via ML-KEM-768 then AES-256-GCM decrypt
+      decryptedBuffer = decryptBufferPQ(
+        file.encrypted_data,
+        file.encryption_iv,
+        file.encryption_auth_tag,
+        file.kem_wrapped_dek,
+        file.kem_cipher_text,
+        file.checksum_sha256
+      );
+      pqProtected = true;
+    } else {
+      // Legacy path: decrypt with static master key
+      decryptedBuffer = decryptBuffer(
+        file.encrypted_data,
+        file.encryption_iv,
+        file.encryption_auth_tag,
+        file.checksum_sha256
+      );
+    }
 
     const userId = req.user ? req.user.id : null;
     await db.query(
@@ -326,15 +351,18 @@ router.get('/:id/download', optionalAuth, async (req, res) => {
         userId,
         req.ip || '127.0.0.1',
         req.headers['user-agent'] || 'App',
-        JSON.stringify({ filename: file.original_name, checksumVerified: true })
+        JSON.stringify({ filename: file.original_name, checksumVerified: true, pqProtected })
       ]
     );
 
     res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.original_name)}"`);
     res.setHeader('Content-Length', decryptedBuffer.length);
-    res.setHeader('X-Encryption-Status', 'AES-256-GCM-Verified');
+    res.setHeader('X-Encryption-Status', pqProtected ? 'AES-256-GCM+ML-KEM-768-Verified' : 'AES-256-GCM-Verified');
     res.setHeader('X-Integrity-SHA256', file.checksum_sha256);
+    if (pqProtected) {
+      res.setHeader('X-PQ-KEM-Status', 'ML-KEM-768-Wrapped');
+    }
 
     return res.send(decryptedBuffer);
 
