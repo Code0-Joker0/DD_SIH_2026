@@ -4,6 +4,9 @@
 !.env.example
 *.env
 
+# Windows NTFS Alternate Data Streams (Zone Identifier)
+*:Zone.Identifier
+
 # Node & Package Managers
 node_modules/
 **/node_modules/
@@ -67,3 +70,4 @@ Thumbs.db
 downloaded_*.docx
 chat_payload.json
 test_doc.txt
+*:Zone.Identifier
