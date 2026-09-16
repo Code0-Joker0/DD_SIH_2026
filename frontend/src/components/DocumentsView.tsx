@@ -83,11 +83,11 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
     if (!uploadedFile) return;
 
     setIsUploading(true);
-    setStatusMessage({ type: 'info', text: `Encrypting (AES-256-GCM) and committing "${uploadedFile.name}" to PostgreSQL...` });
+    setStatusMessage({ type: 'info', text: `Uploading "${uploadedFile.name}" to Database...` });
 
     try {
       await uploadCompanyFile(uploadedFile);
-      setStatusMessage({ type: 'success', text: `"${uploadedFile.name}" successfully encrypted and committed with SHA-256 integrity verification.` });
+      setStatusMessage({ type: 'success', text: `"${uploadedFile.name}" successfully uploaded to the database.` });
       await loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -114,7 +114,7 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
 
   // Handle File Deletion
   const handleDelete = async (file: CompanyFile) => {
-    if (!window.confirm(`Are you sure you want to permanently purge "${file.name}" from encrypted storage?`)) {
+    if (!window.confirm(`Are you sure you want to permanently purge "${file.name}" from database?`)) {
       return;
     }
 
@@ -152,10 +152,10 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
       <header className="subpage-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <div>
           <h2 className="subpage-title" style={{ fontSize: '1.5rem', fontWeight: 600, color: '#F8FAFC', margin: 0 }}>
-            PostgreSQL Encrypted Documents Repository
+            Documents Repository
           </h2>
           <p className="subpage-subtitle" style={{ fontSize: '0.88rem', color: '#94A3B8', marginTop: '0.25rem' }}>
-            Hardware-accelerated AES-256-GCM encrypted binary storage with SHA-256 cryptographic integrity validation.
+            
           </p>
         </div>
         
@@ -176,7 +176,7 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
             }}
           >
             <Upload size={15} />
-            <span>{isUploading ? 'Encrypting...' : 'Upload & Encrypt File'}</span>
+            <span>{isUploading ? 'Uploading...' : 'Upload File'}</span>
             <input 
               type="file" 
               onChange={handleFileUpload} 
@@ -226,18 +226,18 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <ShieldCheck size={22} color="#34D399" />
             <div>
-              <div style={{ fontSize: '0.75rem', color: '#94A3B8', textTransform: 'uppercase' }}>Total Storage Encrypted</div>
+              <div style={{ fontSize: '0.75rem', color: '#94A3B8', textTransform: 'uppercase' }}>Total Storage</div>
               <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#F8FAFC' }}>{stats.totalEncryptedStorage}</div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {/* <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <CheckCircle2 size={22} color="#A78BFA" />
             <div>
-              <div style={{ fontSize: '0.75rem', color: '#94A3B8', textTransform: 'uppercase' }}>Security Protocol</div>
+              <div style={{ fontSize: '0.75rem', color: '#94A3B8', textTransform: 'uppercase' }}></div>
               <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#F8FAFC' }}>{stats.securityProtocol}</div>
             </div>
-          </div>
+          </div> */}
         </div>
       )}
 
@@ -339,11 +339,11 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
         <div className="subpage-table-body">
           {isLoading ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#94A3B8' }}>
-              Loading encrypted repository records...
+              Loading repository records...
             </div>
           ) : files.length === 0 ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#94A3B8' }}>
-              No encrypted files found matching criteria.
+              No files found matching criteria.
             </div>
           ) : (
             files.map((doc) => (
@@ -395,7 +395,7 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
                     type="button"
                     onClick={() => handleDownload(doc)}
                     disabled={downloadingId === doc.id}
-                    title="Decrypt on the fly with AES-256-GCM & Download"
+                    title="Download File"
                     style={{
                       background: 'rgba(59, 130, 246, 0.15)',
                       border: '1px solid rgba(59, 130, 246, 0.3)',
@@ -409,13 +409,13 @@ export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }:
                     }}
                   >
                     <Download size={13} />
-                    <span style={{ fontSize: '0.75rem' }}>{downloadingId === doc.id ? 'Decrypting...' : 'Decrypt & Download'}</span>
+                    <span style={{ fontSize: '0.75rem' }}>{downloadingId === doc.id ? 'Downloading...' : 'Download'}</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleDelete(doc)}
-                    title="Securely purge file from PostgreSQL"
+                    title="Securely purge file from database"
                     style={{
                       background: 'rgba(239, 68, 68, 0.15)',
                       border: '1px solid rgba(239, 68, 68, 0.3)',
