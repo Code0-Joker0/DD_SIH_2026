@@ -24,9 +24,49 @@ const FASTAPI_PORT = process.env.API_PORT || 8000;
 const FASTAPI_BASE_URL = `http://${FASTAPI_HOST}:${FASTAPI_PORT}`;
 
 // 3. Middlewares
-app.use(cors());
+
+const ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+];
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, curl, or server-to-server) or matching origin
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Blocked by CORS: Untrusted Origin'));
+        }
+    },
+    credentials: true
+}));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+app.use((req, res, next) => {
+    const rawIp = req.socket.remoteAddress || req.ip || '';
+    
+    // Check loopback (IPv4/IPv6) or trusted internal subnets (10.x.x.x, 192.168.x.x)
+    const isLocalOrInternal = 
+        rawIp.includes('127.0.0.1') || 
+        rawIp.includes('::1') || 
+        rawIp.startsWith('10.') || 
+        rawIp.startsWith('192.168.') ||
+        rawIp === '::ffff:127.0.0.1'; // Handles IPv4-mapped IPv6 addresses
+
+    if (!isLocalOrInternal) {
+        console.warn(`[FIREWALL DROP] Unauthorized ingress attempt from: ${rawIp}`);
+        return res.status(403).json({
+            error: 'Forbidden: Access restricted to sovereign local loopback and enterprise subnets.'
+        });
+    }
+
+    // Attach telemetry header confirming request met air-gap criteria
+    res.setHeader('X-Sovereign-Airgap', 'Active-Zero-WAN');
+    next();
+});
 
 // 4. Mount Enterprise Auth & Encrypted Vault Routes
 app.use('/api/auth', authRouter);
