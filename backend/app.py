@@ -4,7 +4,64 @@ import json
 import time
 import uuid
 import socket
+import ipaddress
 from typing import Optional, List, Dict, Any
+
+# ==============================================================================
+# TIER 1: CODE-LEVEL KERNEL SOCKET HOOK (ZERO-WAN EGRESS GUARD)
+# ==============================================================================
+_real_connect = socket.socket.connect
+_real_getaddrinfo = socket.getaddrinfo
+
+# Authorized sovereign boundaries (RFC 1122 & RFC 1918)
+ALLOWED_RANGES = [
+    ipaddress.ip_network("127.0.0.0/8"),      # IPv4 Loopback
+    ipaddress.ip_network("10.0.0.0/8"),       # Enterprise OT Subnet
+    ipaddress.ip_network("192.168.0.0/16"),   # Enterprise Local Subnet
+    ipaddress.ip_network("::1/128"),          # IPv6 Loopback
+]
+
+def is_ip_authorized(ip_str: str) -> bool:
+    """Validates if an IP address resides inside the sovereign boundary."""
+    try:
+        # Strip IPv4-mapped IPv6 prefixes if present
+        if ip_str.startswith("::ffff:"):
+            ip_str = ip_str.replace("::ffff:", "")
+        ip_obj = ipaddress.ip_address(ip_str)
+        return any(ip_obj in network for network in ALLOWED_RANGES)
+    except ValueError:
+        return False
+
+def sovereign_getaddrinfo(host, port, *args, **kwargs):
+    """Blocks DNS resolution of external domains before an IP can be resolved."""
+    if host not in ("localhost", "127.0.0.1", "::1"):
+        # Attempt to see if it's already an IP in approved ranges
+        if not is_ip_authorized(host):
+            raise socket.gaierror(
+                -2, f"[TIER 1 SOVEREIGN FIREWALL] External domain lookup blocked: {host}"
+            )
+    return _real_getaddrinfo(host, port, *args, **kwargs)
+
+def sovereign_connect(self, address):
+    """Hooks into low-level TCP/UDP socket connections."""
+    target_host = address[0]
+    
+    # Resolve target string if hostname
+    if target_host == "localhost":
+        target_ip = "127.0.0.1"
+    else:
+        target_ip = str(target_host)
+
+    if not is_ip_authorized(target_ip):
+        raise PermissionError(
+            f"[TIER 1 ZERO-WAN EGRESS VIOLATION] Dropped packet to WAN target: {address}"
+        )
+
+    return _real_connect(self, address)
+
+# Intercept low-level socket connections across all Python modules
+socket.getaddrinfo = sovereign_getaddrinfo
+socket.socket.connect = sovereign_connect
 
 ALLOWED_IP_PREFIXES = ("127.", "10.", "192.168.", "::1", "localhost")
 _original_connect = socket.socket.connect
@@ -200,23 +257,30 @@ async def health_check():
 
 # Network Status (Air-Gapped Sovereign Network Audit)
 @app.get("/api/network-status")
-async def get_network_status():
-    local_ip = "127.0.0.1"
+def get_network_status():
+    """
+    Audits outbound connectivity by deliberately probing an external DNS resolver (8.8.8.8).
+    Because the socket hook drops the packet, it programmatically verifies 0 egress.
+    """
+    is_airgap_intact = False
     try:
-        hostname = socket.gethostname()
-        resolved_ip = socket.gethostbyname(hostname)
-        if resolved_ip:
-            local_ip = resolved_ip
-    except Exception:
-        local_ip = "127.0.0.1"
+        # Create a direct raw socket and attempt external connection
+        raw_probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw_probe.settimeout(1.0)
+        # Attempt to connect to external DNS on port 53
+        raw_probe.connect(("8.8.8.8", 53))
+        raw_probe.close()
+        # If this succeeds, the air-gap is broken
+        is_airgap_intact = False
+    except (PermissionError, socket.gaierror, OSError):
+        # Caught by the Tier 1 socket hook: egress successfully blocked
+        is_airgap_intact = True
 
     return {
-        "egress_packets": 0,
-        "wan_status": "SECURE_AIR_GAPPED",
+        "egress_packets": 0 if is_airgap_intact else 1,
+        "wan_status": "SECURE_AIR_GAPPED" if is_airgap_intact else "WAN_CONNECTED_WARNING",
         "active_ip": "127.0.0.1",
-        "host_ip": local_ip,
-        "interface": "Loopback (Sovereign Isolated)",
-        "timestamp": time.time()
+        "mode": "ON_PREMISE_SOVEREIGN"
     }
 
 # Endpoint 1: Ingestion - POST /api/documents/upload

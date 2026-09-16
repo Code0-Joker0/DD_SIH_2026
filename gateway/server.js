@@ -8,6 +8,49 @@ import path from 'path';
 import dotenv from 'dotenv';
 import http from 'http';
 import https from 'https';
+import net from 'net';
+import tls from 'tls';
+
+// ==============================================================================
+// TIER 1: RUNTIME SOCKET HOOK (NODE.JS ZERO-WAN EGRESS GUARD)
+// ==============================================================================
+const ALLOWED_TARGETS = ['127.0.0.1', 'localhost', '::1', '::ffff:127.0.0.1'];
+
+function isPermittedHost(host) {
+  if (!host) return false;
+  return (
+    ALLOWED_TARGETS.includes(host) ||
+    host.startsWith('10.') ||
+    host.startsWith('192.168.')
+  );
+}
+
+// Hook raw TCP socket creations (covers native http, net, and custom agents)
+const originalNetConnect = net.Socket.prototype.connect;
+net.Socket.prototype.connect = function (...args) {
+  let targetHost = '';
+  if (typeof args[0] === 'object' && args[0] !== null) {
+    targetHost = args[0].host || args[0].hostname || '127.0.0.1';
+  } else if (typeof args[1] === 'string') {
+    targetHost = args[1];
+  }
+
+  if (!isPermittedHost(targetHost)) {
+    const egressError = new Error(
+      `[TIER 1 CODE FIREWALL] Dropped outbound TCP packet to WAN: ${targetHost}`
+    );
+    egressError.code = 'ECONNREFUSED';
+    console.error(`\x1b[31m${egressError.message}\x1b[0m`);
+    
+    // Abort connection lifecycle immediately
+    process.nextTick(() => {
+      this.destroy(egressError);
+    });
+    return this;
+  }
+
+  return originalNetConnect.apply(this, args);
+};
 
 // --- RUNTIME CODE FIREWALL: GLOBAL EGRESS INTERCEPTOR ---
 const ALLOWED_INTERNAL_TARGETS = ['127.0.0.1', 'localhost', '::1'];
