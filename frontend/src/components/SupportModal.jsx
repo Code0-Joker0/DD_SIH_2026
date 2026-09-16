@@ -10,7 +10,7 @@ export default function SupportModal({ isOpen, onClose }) {
         <div className="modal-header">
           <div className="modal-title">
             <BookOpen size={20} style={{ color: 'var(--accent-blue)' }} />
-            <span>Sovereign AI Support & System Docs</span>
+            <span>Singularity Support & System Docs</span>
           </div>
           <button className="close-btn" onClick={onClose} aria-label="Close modal">
             <X size={20} />

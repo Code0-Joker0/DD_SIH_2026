@@ -66,7 +66,7 @@ export default function App() {
           fontFamily: 'system-ui, sans-serif'
         }}
       >
-        Initializing Sovereign Workbench...
+        Initializing Singularity...
       </div>
     );
   }

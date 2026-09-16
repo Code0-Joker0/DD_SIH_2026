@@ -198,7 +198,7 @@ export default function SettingsView({ onSignOut }) {
           </div>
           <div className="logout-action-row font-sans">
             <div className="logout-info">
-              <span className="logout-title">Sign out of Sovereign AI</span>
+              <span className="logout-title">Sign out of Singularity</span>
               <span className="logout-sub font-mono">End your active session on this appliance</span>
             </div>
             {onSignOut && (

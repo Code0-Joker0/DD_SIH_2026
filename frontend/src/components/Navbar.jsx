@@ -11,7 +11,7 @@ export default function Navbar({ onOpenSupport }) {
         <div className="brand-icon-box">
           <Shield size={18} strokeWidth={2.2} />
         </div>
-        <span className="brand-title">Sovereign AI Workbench</span>
+        <span className="brand-title">Singularity</span>
         <span className="version-pill">AIR-GAPPED v2.4</span>
       </div>
       

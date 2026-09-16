@@ -10,13 +10,13 @@ export default function LeftPanel() {
         </div>
 
         <h1 className="main-heading">
-          Sovereign AI Workbench
+          Singularity
         </h1>
 
         <div className="illustration-card">
           <img 
             src="/assets/diagram.png" 
-            alt="Sovereign AI Workbench Architecture Diagram" 
+            alt="Singularity Architecture Diagram" 
             className="diagram-image"
           />
         </div>
