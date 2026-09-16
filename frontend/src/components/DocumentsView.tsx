@@ -19,18 +19,29 @@ import {
   uploadCompanyFile, 
   downloadCompanyFile, 
   deleteCompanyFile, 
-  getStorageStats 
+  getStorageStats,
+  type CompanyFile,
+  type StorageStats
 } from '../utils/api';
 
-export default function DocumentsView({ onNavigateNewTask }) {
-  const [files, setFiles] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [activeFilter, setActiveFilter] = useState('All');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isUploading, setIsUploading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState(null);
-  const [downloadingId, setDownloadingId] = useState(null);
+interface StatusMessage {
+  type: 'info' | 'success' | 'error';
+  text: string;
+}
+
+interface DocumentsViewProps {
+  onNavigateNewTask?: () => void;
+}
+
+export default function DocumentsView({ onNavigateNewTask: _onNavigateNewTask }: DocumentsViewProps) {
+  const [files, setFiles] = useState<CompanyFile[]>([]);
+  const [stats, setStats] = useState<StorageStats | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Load files and stats on mount
   const loadData = async () => {
@@ -42,9 +53,10 @@ export default function DocumentsView({ onNavigateNewTask }) {
       ]);
       setFiles(filesList);
       if (storageStats) setStats(storageStats);
-    } catch (err) {
-      console.error('Failed to load files:', err);
-      setStatusMessage({ type: 'error', text: err.message || 'Failed to retrieve repository records' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Failed to load files:', msg);
+      setStatusMessage({ type: 'error', text: msg || 'Failed to retrieve repository records' });
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +78,7 @@ export default function DocumentsView({ onNavigateNewTask }) {
   }, [searchQuery]);
 
   // Handle File Upload
-  const handleFileUpload = async (event) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = event.target.files?.[0];
     if (!uploadedFile) return;
 
@@ -77,8 +89,9 @@ export default function DocumentsView({ onNavigateNewTask }) {
       await uploadCompanyFile(uploadedFile);
       setStatusMessage({ type: 'success', text: `"${uploadedFile.name}" successfully encrypted and committed with SHA-256 integrity verification.` });
       await loadData();
-    } catch (err) {
-      setStatusMessage({ type: 'error', text: `Upload failed: ${err.message}` });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMessage({ type: 'error', text: `Upload failed: ${msg}` });
     } finally {
       setIsUploading(false);
       event.target.value = '';
@@ -87,19 +100,20 @@ export default function DocumentsView({ onNavigateNewTask }) {
   };
 
   // Handle File Download & Decryption
-  const handleDownload = async (file) => {
+  const handleDownload = async (file: CompanyFile) => {
     setDownloadingId(file.id);
     try {
       await downloadCompanyFile(file.id, file.name);
-    } catch (err) {
-      alert(`Download failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Download failed: ${msg}`);
     } finally {
       setDownloadingId(null);
     }
   };
 
   // Handle File Deletion
-  const handleDelete = async (file) => {
+  const handleDelete = async (file: CompanyFile) => {
     if (!window.confirm(`Are you sure you want to permanently purge "${file.name}" from encrypted storage?`)) {
       return;
     }
@@ -109,13 +123,14 @@ export default function DocumentsView({ onNavigateNewTask }) {
       setStatusMessage({ type: 'success', text: `File "${file.name}" purged.` });
       setFiles(prev => prev.filter(f => f.id !== file.id));
       getStorageStats().then(setStats).catch(() => {});
-    } catch (err) {
-      alert(`Failed to delete: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Failed to delete: ${msg}`);
     }
   };
 
   // Icon selector helper
-  const getFileIcon = (type) => {
+  const getFileIcon = (type: string) => {
     switch (type) {
       case 'PDF':
         return <FileText size={16} color="#34D399" />;

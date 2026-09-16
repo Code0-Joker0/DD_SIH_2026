@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Shield,
   Bell,
   PlusSquare,
   BookOpen,
   Settings as SettingsIcon,
-  ChevronDown,
   Lock,
   Sun,
   Moon,
@@ -28,6 +27,11 @@ import HistoryView from './HistoryView';
 import SettingsView from './SettingsView';
 import DocumentsView from './DocumentsView';
 import ConversationWorkspaceView from './ConversationWorkspaceView';
+import type { 
+  ActiveChat, 
+  ChatMessage, 
+  AttachedFile 
+} from './ConversationWorkspaceView';
 import AdminConsoleView from './admin/AdminConsoleView';
 import { useTheme } from '../context/useTheme';
 import { INITIAL_CHATS, INITIAL_SOURCE_FILES } from '../data/chatStore';
@@ -39,7 +43,21 @@ import {
   uploadCompanyFile 
 } from '../utils/api';
 
-const createBlankChat = () => ({
+export interface UserProfile {
+  id?: string;
+  username?: string;
+  email?: string;
+  full_name?: string;
+  role?: string;
+  department?: string;
+}
+
+export interface DashboardViewProps {
+  user?: UserProfile | null;
+  onSignOut?: () => void;
+}
+
+const createBlankChat = (): ActiveChat => ({
   id: `chat_${Date.now()}`,
   title: 'New Conversation',
   userId: 'usr_rkulkarni',
@@ -54,21 +72,21 @@ const createBlankChat = () => ({
   messages: []
 });
 
-export default function DashboardView({ user, onSignOut }) {
+export default function DashboardView({ user, onSignOut }: DashboardViewProps) {
   const { effectiveTheme, toggleQuickTheme } = useTheme();
-  const [workspaceMode, setWorkspaceMode] = useState('user'); // 'user' | 'admin'
-  const [activeTab, setActiveTab] = useState('Chat'); // 'Chat' | 'Knowledge' | 'Documents' | 'History' | 'Settings'
+  const [workspaceMode, setWorkspaceMode] = useState<'user' | 'admin'>('user');
+  const [activeTab, setActiveTab] = useState<'Chat' | 'Knowledge' | 'Documents' | 'History' | 'Settings'>('Chat');
 
   // Chats state
-  const [chats, setChats] = useState(() => [createBlankChat(), ...INITIAL_CHATS]);
-  const [activeChatId, setActiveChatId] = useState(() => chats[0]?.id || 'chat_init');
-  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [chats, setChats] = useState<ActiveChat[]>(() => [createBlankChat(), ...(INITIAL_CHATS as unknown as ActiveChat[])]);
+  const [activeChatId, setActiveChatId] = useState<string>(() => chats[0]?.id || 'chat_init');
+  const [chatSearchQuery, setChatSearchQuery] = useState<string>('');
 
   // Chat action dropdown & edit states
-  const [openChatMenuId, setOpenChatMenuId] = useState(null);
-  const [renamingChatId, setRenamingChatId] = useState(null);
-  const [renameTitleInput, setRenameTitleInput] = useState('');
-  const [deletingChatId, setDeletingChatId] = useState(null);
+  const [openChatMenuId, setOpenChatMenuId] = useState<string | null>(null);
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
+  const [renameTitleInput, setRenameTitleInput] = useState<string>('');
+  const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
   
   // Sovereign Air-Gap Network Telemetry state
   const [networkStatus, setNetworkStatus] = useState({
@@ -103,8 +121,8 @@ export default function DashboardView({ user, onSignOut }) {
   useEffect(() => {
     if (!openChatMenuId) return;
 
-    const handleClickOutside = (event) => {
-      if (!event.target.closest('.chat-item-actions-wrapper')) {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement)?.closest?.('.chat-item-actions-wrapper')) {
         setOpenChatMenuId(null);
       }
     };
@@ -127,7 +145,18 @@ export default function DashboardView({ user, onSignOut }) {
   };
 
   // Live Agent Handler: Send Message to Node Gateway & FastAPI/Ollama
-  const handleSendMessage = async ({ prompt, attachedFiles = [], sourcesCount = 0 }) => {
+  const handleSendMessage = async ({
+    prompt,
+    attachedFiles = [],
+    sourcesCount = 0
+  }: {
+    prompt: string;
+    attachedFiles?: AttachedFile[];
+    knowledgeScope?: string;
+    selectedSourceIds?: string[];
+    sourcesCount?: number;
+    aiMode?: string;
+  }) => {
     if (!activeChatId || !prompt?.trim()) return;
 
     const targetChatId = activeChatId;
@@ -135,7 +164,7 @@ export default function DashboardView({ user, onSignOut }) {
     const aiMsgId = `msg_ai_${Date.now()}`;
     const startTime = performance.now();
 
-    const userMessage = {
+    const userMessage: ChatMessage = {
       id: userMsgId,
       sender: 'user',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -152,7 +181,7 @@ export default function DashboardView({ user, onSignOut }) {
       : currentChat?.title;
 
     // Temporary streaming/progress placeholder
-    const pendingAiMessage = {
+    const pendingAiMessage: ChatMessage = {
       id: aiMsgId,
       sender: 'ai',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -199,12 +228,13 @@ export default function DashboardView({ user, onSignOut }) {
         for (const fileItem of attachedFiles) {
           if (fileItem instanceof File || fileItem?.rawFile instanceof File) {
             try {
-              await uploadRAGDocument(fileItem.rawFile || fileItem, {
+              await uploadRAGDocument(fileItem.rawFile || (fileItem as unknown as File), {
                 category: 'ChatAttachment',
                 source_type: 'USER_UPLOAD'
               });
-            } catch (upErr) {
-              console.warn('[ATTACHMENT INGESTION SKIPPED]:', upErr.message);
+            } catch (upErr: unknown) {
+              const msg = upErr instanceof Error ? upErr.message : String(upErr);
+              console.warn('[ATTACHMENT INGESTION SKIPPED]:', msg);
             }
           }
         }
@@ -215,9 +245,12 @@ export default function DashboardView({ user, onSignOut }) {
       const data = await sendChatMessage(prompt, targetChatId, docIds);
 
       const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(2);
-      const answerText = data.response || data.message || data.text || (typeof data === 'string' ? data : JSON.stringify(data));
-      const sourceList = Array.isArray(data.sources) && data.sources.length > 0
-        ? data.sources.map(s => typeof s === 'string' ? s : s.filename || s.title || 'Referenced Document')
+      const rawAnswer = data.response || data.message || data.text;
+      const answerText: string = typeof rawAnswer === 'string'
+        ? rawAnswer
+        : (rawAnswer ? JSON.stringify(rawAnswer) : (typeof data === 'string' ? data : JSON.stringify(data)));
+      const sourceList: string[] = Array.isArray(data.sources) && data.sources.length > 0
+        ? data.sources.map((s: any) => typeof s === 'string' ? s : s.filename || s.title || 'Referenced Document')
         : INITIAL_SOURCE_FILES.slice(0, Math.min(sourcesCount || 2, 3)).map(d => d.name);
 
       // 4. Auto-generate deliverable note and commit to encrypted vault if requested
@@ -235,7 +268,7 @@ export default function DashboardView({ user, onSignOut }) {
 
       if (isDeliverableRequested && generatedFilesList.length === 0) {
         try {
-          const primaryFile = attachedFiles[0]?.rawFile || (attachedFiles[0] instanceof File ? attachedFiles[0] : null);
+          const primaryFile = attachedFiles[0]?.rawFile || (attachedFiles[0] instanceof File ? (attachedFiles[0] as unknown as File) : null);
           const docxBlob = await executeAgentTask(prompt, primaryFile);
           const deliverableName = `MRPL_Approval_Note_${Date.now()}.docx`;
 
@@ -247,8 +280,9 @@ export default function DashboardView({ user, onSignOut }) {
               department: 'Asset Integrity',
               category: 'DOCX'
             });
-          } catch (vErr) {
-            console.warn('[VAULT AUTO-ARCHIVE NOTICE]:', vErr.message);
+          } catch (vErr: unknown) {
+            const msg = vErr instanceof Error ? vErr.message : String(vErr);
+            console.warn('[VAULT AUTO-ARCHIVE NOTICE]:', msg);
           }
 
           generatedFilesList = [
@@ -259,8 +293,9 @@ export default function DashboardView({ user, onSignOut }) {
               status: 'Committed to Encrypted Vault'
             }
           ];
-        } catch (taskErr) {
-          console.warn('[AGENT DELIVERABLE TASK NOTICE]:', taskErr.message);
+        } catch (taskErr: unknown) {
+          const msg = taskErr instanceof Error ? taskErr.message : String(taskErr);
+          console.warn('[AGENT DELIVERABLE TASK NOTICE]:', msg);
         }
       }
 
@@ -269,7 +304,7 @@ export default function DashboardView({ user, onSignOut }) {
         if (chat.id === targetChatId) {
           return {
             ...chat,
-            messages: (chat.messages || []).map(m => {
+            messages: (chat.messages || []).map((m): ChatMessage => {
               if (m.id === aiMsgId) {
                 return {
                   ...m,
@@ -311,16 +346,17 @@ export default function DashboardView({ user, onSignOut }) {
         return chat;
       }));
 
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('[CHAT ENGINE ERROR]:', err);
       const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(2);
+      const errMsg = err instanceof Error ? err.message : String(err);
 
       // Render clean diagnostic failure message in the UI
       setChats(prev => prev.map(chat => {
         if (chat.id === targetChatId) {
           return {
             ...chat,
-            messages: (chat.messages || []).map(m => {
+            messages: (chat.messages || []).map((m): ChatMessage => {
               if (m.id === aiMsgId) {
                 return {
                   ...m,
@@ -332,7 +368,7 @@ export default function DashboardView({ user, onSignOut }) {
                       { key: 'reading', label: 'Verifying network availability', status: 'failed' },
                       { key: 'inference', label: 'Connecting to inference engine', status: 'failed' }
                     ],
-                    answer: `⚠️ **Inference Gateway Unreachable**\n\nCould not reach the local AI engine at \`http://localhost:3000/api/chat\` or \`http://127.0.0.1:8000/api/chat\`.\n\n*Error details*: ${err.message}`,
+                    answer: `⚠️ **Inference Gateway Unreachable**\n\nCould not reach the local AI engine at \`http://localhost:3000/api/chat\` or \`http://127.0.0.1:8000/api/chat\`.\n\n*Error details*: ${errMsg}`,
                     findings: [
                       {
                         num: 'ERR',
@@ -363,13 +399,13 @@ export default function DashboardView({ user, onSignOut }) {
   };
 
   // Handler: Chat Actions Menu
-  const handlePinChat = (chatId) => {
+  const handlePinChat = (chatId: string) => {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, pinned: !c.pinned } : c));
     setOpenChatMenuId(null);
   };
 
-  const handleDuplicateChat = (chatToDup) => {
-    const dupChat = {
+  const handleDuplicateChat = (chatToDup: ActiveChat) => {
+    const dupChat: ActiveChat = {
       ...chatToDup,
       id: `chat_${Date.now()}`,
       title: `${chatToDup.title} (Copy)`,
@@ -381,7 +417,7 @@ export default function DashboardView({ user, onSignOut }) {
     setOpenChatMenuId(null);
   };
 
-  const handleConfirmRename = (chatId) => {
+  const handleConfirmRename = (chatId: string) => {
     if (!renameTitleInput.trim()) return;
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: renameTitleInput.trim() } : c));
     setRenamingChatId(null);
@@ -477,14 +513,14 @@ export default function DashboardView({ user, onSignOut }) {
             className="user-profile-badge-new"
             onClick={() => {
               if (window.confirm(`Sign out of enterprise session for ${user?.full_name || 'Reva Kulkarni'}?`)) {
-                onSignOut();
+                if (onSignOut) onSignOut();
               }
             }}
             title="Click to Sign Out"
             style={{ cursor: 'pointer' }}
           >
             <div className="avatar-circle-purple font-mono">
-              {user?.full_name ? user.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'RK'}
+              {user?.full_name ? user.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() : 'RK'}
             </div>
             <div className="user-meta-info">
               <span className="user-full-name">{user?.full_name || 'Reva Kulkarni'}</span>
@@ -627,7 +663,7 @@ export default function DashboardView({ user, onSignOut }) {
 
           {activeTab === 'History' && (
             <HistoryView
-              onViewResult={(taskItem) => {
+              onViewResult={(taskItem: any) => {
                 const foundChat = chats.find(c =>
                   c.title?.toLowerCase().includes(taskItem.name?.toLowerCase()) ||
                   c.id === taskItem.id
@@ -705,7 +741,7 @@ export default function DashboardView({ user, onSignOut }) {
   );
 
   // Helper render for single chat item in sidebar
-  function renderChatItem(chat) {
+  function renderChatItem(chat: ActiveChat) {
     const isActive = activeTab === 'Chat' && activeChatId === chat.id;
     const isMenuOpen = openChatMenuId === chat.id;
 

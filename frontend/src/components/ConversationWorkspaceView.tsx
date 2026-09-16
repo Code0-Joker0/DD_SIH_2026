@@ -1,21 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Paperclip, 
-  Play, 
-  Check, 
   ChevronDown, 
-  ChevronRight, 
   FileText, 
   FileSpreadsheet, 
   Download, 
-  Eye, 
-  CheckCircle2, 
   X, 
   BookOpen, 
   CheckSquare, 
   Square,
   AlertCircle,
-  Sparkles,
   Info
 } from 'lucide-react';
 import { INITIAL_SOURCE_FILES } from '../data/chatStore';
@@ -40,30 +34,100 @@ const AI_MODES = [
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.webp'];
 
-export default function ConversationWorkspaceView({ activeChat, onSendMessage }) {
-  const [promptInput, setPromptInput] = useState('');
-  const [attachedFiles, setAttachedFiles] = useState([]);
-  const [fileError, setFileError] = useState('');
+export interface AttachedFile {
+  name: string;
+  size: string;
+  status?: string;
+  rawFile?: File;
+}
+
+export interface FindingItem {
+  num: string;
+  title: string;
+  desc: string;
+}
+
+export interface GeneratedFileItem {
+  name: string;
+  size?: string;
+  type?: string;
+  status?: string;
+}
+
+export interface TaskRunItem {
+  id?: string;
+  executionStatus?: string;
+  progressStages?: Array<{ key: string; label: string; status: string }>;
+  answer?: string;
+  findings?: FindingItem[];
+  recommendation?: string;
+  sources?: string[];
+  generatedFiles?: GeneratedFileItem[];
+  technicalDetails?: Record<string, unknown>;
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: 'user' | 'ai';
+  timestamp?: string;
+  content?: string;
+  attachedFiles?: AttachedFile[];
+  selectedSourcesCount?: number;
+  taskRun?: TaskRunItem;
+}
+
+export interface ActiveChat {
+  id: string;
+  title: string;
+  userId?: string;
+  createdDate?: string;
+  updatedDate?: string;
+  pinned?: boolean;
+  archived?: boolean;
+  attachedFileIds?: string[];
+  selectedSourceDocumentIds?: string[];
+  knowledgeScope?: string;
+  aiMode?: string;
+  messages?: ChatMessage[];
+}
+
+export interface ConversationWorkspaceViewProps {
+  activeChat?: ActiveChat;
+  onSendMessage?: (payload: {
+    prompt: string;
+    attachedFiles: AttachedFile[];
+    knowledgeScope: string;
+    selectedSourceIds: string[];
+    sourcesCount: number;
+    aiMode: string;
+  }) => Promise<void> | void;
+}
+
+export default function ConversationWorkspaceView({ activeChat, onSendMessage }: ConversationWorkspaceViewProps) {
+  const [promptInput, setPromptInput] = useState<string>('');
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [fileError, setFileError] = useState<string>('');
   
   // Knowledge scope & source selection state
-  const [knowledgeScope, setKnowledgeScope] = useState('selected');
-  const [selectedSourceIds, setSelectedSourceIds] = useState(['doc_001', 'doc_002', 'doc_005']);
-  const [selectedAiMode, setSelectedAiMode] = useState('auto');
+  const [knowledgeScope, setKnowledgeScope] = useState<string>('selected');
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>(['doc_001', 'doc_002', 'doc_005']);
+  const [selectedAiMode, setSelectedAiMode] = useState<string>('auto');
   
   // Dynamic UI dropdowns & modals
-  const [isAiModeOpen, setIsAiModeOpen] = useState(false);
-  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
-  const [openExecutionDetailsMap, setOpenExecutionDetailsMap] = useState({});
+  const [isAiModeOpen, setIsAiModeOpen] = useState<boolean>(false);
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState<boolean>(false);
+  const [openExecutionDetailsMap, setOpenExecutionDetailsMap] = useState<Record<string, boolean>>({});
 
-  const fileInputRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Close AI Mode picker when clicking anywhere outside
   useEffect(() => {
     if (!isAiModeOpen) return;
 
-    const handleClickOutside = (event) => {
-      if (!event.target.closest('.ai-mode-picker-wrapper')) {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('.ai-mode-picker-wrapper')) {
         setIsAiModeOpen(false);
       }
     };
@@ -87,7 +151,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages?.length]);
 
-  const handleChipClick = (chip) => {
+  const handleChipClick = (chip: string) => {
     if (!promptInput) {
       setPromptInput(`${chip} `);
     } else {
@@ -95,19 +159,20 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     }
   };
 
-  const processFiles = (files) => {
+  const processFiles = (files: FileList | File[]) => {
     setFileError('');
-    const newFiles = [];
-    Array.from(files).forEach((file) => {
-      const ext = '.' + file.name.split('.').pop().toLowerCase();
+    const newFiles: AttachedFile[] = [];
+    Array.from(files).forEach((file: File) => {
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
         setFileError(`Format '${ext}' unsupported. Allowed: PDF, DOCX, XLSX, PPTX, Images.`);
       } else {
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+        const sizeMb = parseFloat((file.size / (1024 * 1024)).toFixed(1));
         newFiles.push({
           name: file.name,
           size: `${sizeMb > 0 ? sizeMb : '0.8'} MB`,
-          status: 'Ready'
+          status: 'Ready',
+          rawFile: file
         });
       }
     });
@@ -117,17 +182,17 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     }
   };
 
-  const handleFileChange = (e) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       processFiles(e.target.files);
     }
   };
 
-  const removeAttachment = (index) => {
+  const removeAttachment = (index: number) => {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const toggleSelectSourceDoc = (id) => {
+  const toggleSelectSourceDoc = (id: string) => {
     setSelectedSourceIds((prev) => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
@@ -143,14 +208,14 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     }
   };
 
-  const toggleExecutionDetails = (msgId) => {
+  const toggleExecutionDetails = (msgId: string) => {
     setOpenExecutionDetailsMap(prev => ({
       ...prev,
       [msgId]: !prev[msgId]
     }));
   };
 
-  const handleFormSubmit = (e) => {
+  const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!promptInput.trim() && attachedFiles.length === 0) return;
 
@@ -209,7 +274,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
         </div>
       )}
 
-      {/* Main Composer Box with Subtle Neon-Blue Hover & Focus Glow */}
+      {/* Main Composer Box */}
       <div className="composer-box">
         <textarea
           className="composer-textarea font-sans"
@@ -250,55 +315,64 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
             {/* Source Selection Button */}
             <button 
               type="button" 
-              className="composer-btn font-mono"
+              className={`composer-btn ${knowledgeScope === 'selected' && selectedSourceIds.length > 0 ? 'active-scope' : ''}`}
               onClick={() => setIsSourceModalOpen(true)}
-              title="Select Sources"
+              title="Configure Sources"
             >
               <BookOpen size={14} />
               <span>
-                {knowledgeScope === 'selected' ? `${selectedSourceIds.length} Sources` : knowledgeScope === 'all' ? 'All Sources' : 'Chat Only'}
+                {knowledgeScope === 'selected' 
+                  ? `${selectedSourceIds.length} Source${selectedSourceIds.length === 1 ? '' : 's'}`
+                  : knowledgeScope === 'all' 
+                    ? 'All Sources' 
+                    : 'Chat Only'
+                }
               </span>
             </button>
-          </div>
 
-          <div className="composer-toolbar-right font-mono">
-            {/* AI Mode Selector Dropdown */}
+            {/* AI Capability Mode Picker */}
             <div className="ai-mode-picker-wrapper">
-              <button
-                type="button"
-                className="ai-mode-picker-trigger font-mono"
+              <button 
+                type="button" 
+                className="composer-btn mode-btn"
                 onClick={() => setIsAiModeOpen(!isAiModeOpen)}
+                title="Select AI Mode"
               >
                 <span>{currentModeObj?.label}</span>
-                <ChevronDown size={13} />
+                <ChevronDown size={13} className={`chevron-transition ${isAiModeOpen ? 'rotate-180' : ''}`} />
               </button>
 
               {isAiModeOpen && (
-                <div className="ai-mode-picker-menu">
+                <div className="ai-mode-dropdown-menu font-sans">
+                  <div className="dropdown-header font-mono">Select Processing Mode</div>
                   {AI_MODES.map((mode) => (
-                    <div
-                      key={mode.id}
-                      className={`mode-picker-item ${selectedAiMode === mode.id ? 'active' : ''}`}
+                    <div 
+                      key={mode.id} 
+                      className={`mode-option-item ${selectedAiMode === mode.id ? 'selected' : ''}`}
                       onClick={() => {
                         setSelectedAiMode(mode.id);
                         setIsAiModeOpen(false);
                       }}
                     >
-                      <span className="mode-item-title font-sans">{mode.label}</span>
+                      <div className="mode-text-block">
+                        <span className="mode-label">{mode.label}</span>
+                        <span className="mode-desc font-mono">{mode.desc}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Send Button */}
+          <div className="composer-toolbar-right">
             <button 
               type="submit" 
-              className="composer-send-btn font-mono"
+              className="composer-send-btn" 
               disabled={!promptInput.trim() && attachedFiles.length === 0}
+              title="Send Message"
             >
-              <Play size={13} fill="currentColor" />
-              <span>Send</span>
+              <span>Run</span>
             </button>
           </div>
         </div>
@@ -307,76 +381,66 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
   );
 
   return (
-    <div className="chat-workspace-container font-sans">
+    <div className="conversation-workspace-container font-sans">
       
-      {/* 1. EMPTY CHAT STATE (CENTERED COMPOSER) */}
+      {/* 1. HERO EMPTY STATE (When no messages exist) */}
       {isChatEmpty ? (
-        <div className="centered-chat-workspace font-sans">
-          <div className="empty-welcome-header">
-            <div className="empty-sparkle-badge">
-              <Sparkles size={24} className="icon-blue" />
+        <div className="workspace-hero-state">
+          <div className="hero-content-box">
+            <h1 className="hero-headline font-sans">
+              What would you like to solve today?
+            </h1>
+            <p className="hero-subtext font-mono">
+              Ask about engineering specs, analyze equipment reports, calculate integrity metrics, or generate official approval notes.
+            </p>
+
+            {/* Centered Composer Form */}
+            <div className="hero-composer-wrapper">
+              {renderComposerForm(true)}
             </div>
-            <h1 className="empty-welcome-heading font-sans">What would you like to work on?</h1>
-          </div>
 
-          {/* Large Centered Composer Box with Subtle Neon Glow */}
-          <div className="centered-composer-container">
-            {renderComposerForm(true)}
-          </div>
-
-          {/* Shortcut Chips Below Centered Composer */}
-          <div className="centered-shortcuts-row font-mono">
-            <div className="chips-scroll">
-              {SUGGESTION_CHIPS.map((chip) => (
-                <button
-                  type="button"
-                  key={chip}
-                  className="shortcut-chip-btn"
-                  onClick={() => handleChipClick(chip)}
-                >
-                  {chip}
-                </button>
-              ))}
+            {/* Suggestion Chips */}
+            <div className="suggestion-chips-wrapper">
+              <span className="chips-label font-mono">Quick Suggestions:</span>
+              <div className="chips-row">
+                {SUGGESTION_CHIPS.map((chip, idx) => (
+                  <button 
+                    key={idx} 
+                    type="button" 
+                    className="suggestion-chip-btn font-mono"
+                    onClick={() => handleChipClick(chip)}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       ) : (
-        /* 2. ACTIVE CHAT STATE (SCROLLABLE MESSAGES + BOTTOM COMPOSER) */
+        /* 2. ACTIVE CONVERSATION THREAD */
         <>
-          {/* Top Conversation Header */}
-          <header className="chat-topbar font-sans">
-            <div className="chat-topbar-left">
-              <h2 className="chat-topbar-title">{activeChat?.title || 'New Conversation'}</h2>
-              <div className="chat-topbar-tags font-mono">
-                {knowledgeScope === 'selected' && (
-                  <button 
-                    type="button" 
-                    className="source-scope-badge"
-                    onClick={() => setIsSourceModalOpen(true)}
-                  >
-                    <BookOpen size={12} />
-                    <span>{selectedSourceIds.length} Sources</span>
-                  </button>
-                )}
-                {knowledgeScope === 'all' && (
-                  <span className="source-scope-badge muted">
-                    <BookOpen size={12} />
-                    <span>All Sources</span>
-                  </span>
-                )}
-                {knowledgeScope === 'current' && (
-                  <span className="source-scope-badge amber">
-                    <Info size={12} />
-                    <span>Chat Only</span>
-                  </span>
-                )}
+          {/* Header with Title and Mode */}
+          <header className="chat-thread-header font-sans">
+            <div className="header-left">
+              <h2 className="chat-thread-title font-sans">
+                {activeChat?.title || 'Active Conversation'}
+              </h2>
+            </div>
+
+            <div className="header-right font-mono">
+              <div className="thread-meta-pill">
+                <span>Mode: {activeChat?.aiMode || 'Auto'}</span>
+              </div>
+              <div className="thread-meta-pill">
+                <span>Scope: {activeChat?.knowledgeScope || 'Selected Sources'}</span>
               </div>
             </div>
           </header>
 
           {/* Scrollable Messages Area */}
           <div className="chat-messages-area font-sans">
-            {activeChat.messages.map((msg, index) => (
+            {(activeChat?.messages || []).map((msg, index) => (
               <div key={msg.id || index} className={`chat-message-row ${msg.sender === 'user' ? 'user-row' : 'ai-row'}`}>
                 
                 {/* USER MESSAGE BUBBLE */}
@@ -481,8 +545,9 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                                     onClick={async () => {
                                       try {
                                         await executeAgentTask(activeChat?.title || 'Perform integrity assessment');
-                                      } catch (err) {
-                                        alert('Download failed: ' + err.message);
+                                      } catch (err: unknown) {
+                                        const msgStr = err instanceof Error ? err.message : String(err);
+                                        alert('Download failed: ' + msgStr);
                                       }
                                     }}
                                   >
@@ -493,6 +558,31 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                               </div>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+                      {/* 6. TECHNICAL DETAILS TOGGLE */}
+                      {msg.taskRun?.technicalDetails && (
+                        <div className="ai-tech-details-section">
+                          <button
+                            type="button"
+                            className="tech-details-toggle font-mono"
+                            onClick={() => toggleExecutionDetails(msg.id)}
+                          >
+                            <Info size={13} />
+                            <span>{openExecutionDetailsMap[msg.id] ? 'Hide Details' : 'Technical Details'}</span>
+                          </button>
+
+                          {openExecutionDetailsMap[msg.id] && (
+                            <div className="tech-details-content font-mono">
+                              {Object.entries(msg.taskRun.technicalDetails).map(([key, val]) => (
+                                <div key={key} className="tech-detail-row">
+                                  <span className="detail-key">{key}:</span>
+                                  <span className="detail-val">{String(val)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -611,12 +701,14 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
 
             <div className="modal-footer font-mono">
               <button 
+                type="button"
                 className="secondary-btn"
                 onClick={() => setIsSourceModalOpen(false)}
               >
                 Cancel
               </button>
               <button 
+                type="button"
                 className="primary-action-btn"
                 onClick={() => setIsSourceModalOpen(false)}
               >
