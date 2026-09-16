@@ -1,7 +1,0 @@
-Pump Maintenance Procedure
-
-Before maintenance, isolate the pump from the process.
-Release stored pressure and verify the zero-energy condition.
-Confirm that the equipment is safe before maintenance begins.
-
-The maintenance activity should be recorded after completion.

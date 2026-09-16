@@ -1,5 +1,7 @@
 # 🛡️ Singularity Sovereign Industrial AI Workbench (MRPL SIH26117)
 
+Problem Statement: Sovereign On-Premise Agentic AI Workbench using Open-Weight Multimodal LLMs for Confidential Industrial Work
+
 > **Zero-WAN Sovereign Asset Integrity Evaluation, Multi-Tier Egress Defense & Air-Gapped Enterprise Vault**
 
 [![Architecture](https://img.shields.io/badge/Architecture-Sovereign%20Air--Gap-0052CC.svg)](#system-architecture)
@@ -344,6 +346,6 @@ curl -s http://127.0.0.1:8000/api/network-status | jq .
 
 ## 📄 License & Confidentiality
 
-**Confidential & Proprietary:** Developed specifically for **Mangalore Refinery and Petrochemicals Limited (MRPL)** under **Smart India Hackathon 2026 (Problem Statement SIH26117)**. 
+**Confidential & Proprietary:** Developed specifically for **Mangalore Refinery and Petrochemicals Limited (MRPL)** under **Smart India Hackathon 2026 (Problem Statement SIH26117)**.
 
 All rights reserved. Unauthorized external reproduction, distribution, or WAN deployment is strictly prohibited.

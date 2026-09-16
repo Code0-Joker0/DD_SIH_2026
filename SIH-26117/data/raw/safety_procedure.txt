@@ -1,8 +1,0 @@
-Industrial Safety Procedure
-
-Personnel must verify that the work area is safe before beginning
-maintenance activities.
-
-Required protective equipment must be worn.
-Hazardous energy sources must be isolated.
-The responsible supervisor must authorize the work.
