@@ -67,3 +67,6 @@ Thumbs.db
 downloaded_*.docx
 chat_payload.json
 test_doc.txt
+
+gateway/data/pglite/
+*.wasm

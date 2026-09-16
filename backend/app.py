@@ -1,9 +1,68 @@
 import os
 import sys
+
+# ==============================================================================
+# ENFORCE SOVEREIGN OFFLINE AIR-GAP (Prior to Any Library Imports)
+# ==============================================================================
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
+import socket
+import ipaddress
+
+# ==============================================================================
+# TIER 1 SOVEREIGN FIREWALL: ZERO-WAN OUTBOUND EGRESS JAIL
+# ==============================================================================
+ALLOWED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),     # Localhost loopback (Ollama, Qdrant, Gateway)
+    ipaddress.ip_network("10.0.0.0/8"),      # Enterprise LAN / Docker containers
+    ipaddress.ip_network("192.168.0.0/16"),  # Enterprise Intranet
+    ipaddress.ip_network("172.16.0.0/12"),   # Docker Bridge Network
+    ipaddress.ip_network("::1/128"),         # IPv6 loopback
+]
+
+_real_getaddrinfo = socket.getaddrinfo
+_real_socket_connect = socket.socket.connect
+
+def _is_ip_authorized(ip_str: str) -> bool:
+    try:
+        # Strip IPv4-mapped IPv6 prefixes if present
+        if ip_str.startswith("::ffff:"):
+            ip_str = ip_str.replace("::ffff:", "")
+        ip_obj = ipaddress.ip_address(ip_str)
+        return any(ip_obj in net for net in ALLOWED_NETWORKS)
+    except ValueError:
+        return False
+
+def sovereign_getaddrinfo(host, port, *args, **kwargs):
+    """Blocks DNS resolution of external domains before an IP can be resolved."""
+    if host not in ("localhost", "127.0.0.1", "::1"):
+        if not _is_ip_authorized(str(host)):
+            raise socket.gaierror(
+                -2, f"[TIER 1 SOVEREIGN FIREWALL] External domain lookup blocked: {host}"
+            )
+    return _real_getaddrinfo(host, port, *args, **kwargs)
+
+def sovereign_connect(self, address):
+    """Hooks into low-level TCP/UDP socket connections to block WAN destinations."""
+    target_host = address[0]
+    target_ip = "127.0.0.1" if target_host == "localhost" else str(target_host)
+
+    if not _is_ip_authorized(target_ip):
+        raise PermissionError(
+            f"[FIREWALL VIOLATION] Programmatic egress blocked to WAN target: {address}"
+        )
+    return _real_socket_connect(self, address)
+
+# Intercept all low-level socket connections across backend libraries
+socket.getaddrinfo = sovereign_getaddrinfo
+socket.socket.connect = sovereign_connect
+# ==============================================================================
+
 import json
 import time
 import uuid
-import socket
 import re
 import requests
 from typing import Optional, List, Dict, Any
@@ -19,7 +78,7 @@ from fastapi.responses import JSONResponse, FileResponse, Response as FastAPIRes
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# Backend tools and single agent imports
+# Backend tools, sandbox, and single agent imports
 from backend.agent import (
     run_agent_task,
     run_pipeline,
@@ -27,12 +86,13 @@ from backend.agent import (
     extract_document_content
 )
 from backend.tools import OUTPUTS_DIR
+from backend.sandbox import execute_in_sandbox, verify_code_safety
 
 # RAG Pipeline Service
 from app.rag.rag_service import RAGService
 
 # ------------------------------------------------------------------------------
-# 1. Environment & Config Variables (Strictly from Environment)
+# 1. Environment & Config Variables
 # ------------------------------------------------------------------------------
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
@@ -57,7 +117,7 @@ os.makedirs(OUTPUTS_DIR, exist_ok=True)
 class SessionMemoryManager:
     """
     Maintains session history in PostgreSQL if configured and available,
-    falling back to a local memory cache for sovereign offline environments.
+    falling back to an in-memory cache for sovereign offline environments.
     """
     def __init__(self, db_url: str):
         self.db_url = db_url
@@ -68,7 +128,7 @@ class SessionMemoryManager:
     def _init_pg(self):
         try:
             import psycopg2
-            conn = psycopg2.connect(self.db_url)
+            conn = psycopg2.connect(self.db_url, connect_timeout=2)
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -90,7 +150,7 @@ class SessionMemoryManager:
         if self.is_pg_connected:
             try:
                 import psycopg2
-                conn = psycopg2.connect(self.db_url)
+                conn = psycopg2.connect(self.db_url, connect_timeout=2)
                 cursor = conn.cursor()
                 cursor.execute(
                     "INSERT INTO chat_sessions (session_id, role, content) VALUES (%s, %s, %s)",
@@ -116,7 +176,7 @@ class SessionMemoryManager:
         if self.is_pg_connected:
             try:
                 import psycopg2
-                conn = psycopg2.connect(self.db_url)
+                conn = psycopg2.connect(self.db_url, connect_timeout=2)
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT role, content FROM chat_sessions WHERE session_id = %s ORDER BY id ASC",
@@ -173,8 +233,8 @@ def select_optimal_model(query: str, sources_count: int = 0, doc_context_len: in
 # ------------------------------------------------------------------------------
 app = FastAPI(
     title="MRPL Sovereign Industrial AI Workbench",
-    description="Single LangGraph Agent API & Local RAG Service for Asset Integrity Evaluation",
-    version="2.2.0"
+    description="Single LangGraph Agent API & Local RAG Service with Tier-1/2 Sovereign Air-Gap Firewalls",
+    version="2.3.0"
 )
 
 app.add_middleware(
@@ -216,6 +276,15 @@ class RAGQueryResponse(BaseModel):
     response: str
     sources: List[Dict[str, Any]]
 
+class SandboxExecRequest(BaseModel):
+    code: str
+
+class SandboxExecResponse(BaseModel):
+    stdout: str
+    stderr: str
+    exit_code: int
+    timed_out: bool
+
 # ------------------------------------------------------------------------------
 # 6. Core Endpoints
 # ------------------------------------------------------------------------------
@@ -226,10 +295,12 @@ class RAGQueryResponse(BaseModel):
 async def health_check():
     return {
         "status": "ONLINE",
-        "service": "Asset Integrity Single Agent API & RAG Engine",
+        "service": "Asset Integrity Sovereign Workbench & Tier-1/2 Firewall",
         "vllm_base_url": VLLM_BASE_URL,
         "qdrant_target": f"{QDRANT_HOST}:{QDRANT_PORT}/{QDRANT_COLLECTION}",
         "postgres_connected": session_db.is_pg_connected,
+        "firewall_tier_1": "ACTIVE (Zero WAN Egress Jail)",
+        "firewall_tier_2": "ACTIVE (AST Subprocess Sandbox)",
         "timestamp": time.time()
     }
 
@@ -237,8 +308,7 @@ async def health_check():
 @app.get("/api/models")
 async def get_available_models():
     """
-    Fetches locally installed models directly from Ollama,
-    falling back to predefined verified models.
+    Fetches locally installed models directly from Ollama on localhost.
     """
     try:
         res = requests.get(f"{VLLM_BASE_URL}/api/tags", timeout=3)
@@ -274,15 +344,13 @@ async def get_network_status():
         "active_ip": "127.0.0.1",
         "host_ip": local_ip,
         "interface": "Loopback (Sovereign Isolated)",
+        "tier1_firewall": "ACTIVE_EGRESS_BLOCK",
         "timestamp": time.time()
     }
 
-# Endpoint 1: Dedicated RAG Query - POST /api/rag/query
+# Dedicated RAG Query - POST /api/rag/query
 @app.post("/api/rag/query", response_model=RAGQueryResponse)
 async def rag_query_endpoint(payload: RAGQueryRequest):
-    """
-    Direct semantic retrieval and grounded response generation using Qdrant (BGE-M3) and LLM.
-    """
     query = (payload.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
@@ -294,17 +362,13 @@ async def rag_query_endpoint(payload: RAGQueryRequest):
         sources=result["sources"]
     )
 
-# Endpoint 2: Document Ingestion - POST /api/documents/upload
+# Document Ingestion - POST /api/documents/upload
 @app.post("/api/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
     equipment_tag: Optional[str] = Form(None),
     category: Optional[str] = Form(None)
 ):
-    """
-    Ingests, extracts, chunks, and vector-indexes uploaded inspection sheets,
-    PDFs, images, and statutory standards directly into Qdrant.
-    """
     if not file or not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
@@ -315,11 +379,9 @@ async def upload_document(
     with open(saved_path, "wb") as f:
         f.write(content)
 
-    # 1. Extract content
     doc_text, img_b64, file_type = extract_document_content(file_path=saved_path)
     doc_id = f"doc_{uuid.uuid4().hex[:8]}"
 
-    # 2. Chunk and index into Qdrant
     chunks_indexed = 0
     if doc_text and doc_text.strip():
         try:
@@ -370,13 +432,9 @@ async def upload_document(
         "message": f"Document '{file.filename}' uploaded and indexed into Qdrant ({chunks_indexed} chunks)."
     }
 
-# Endpoint 3: Interactive Chat Copilot - POST /api/chat
+# Interactive Chat Copilot - POST /api/chat
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(payload: ChatRequest):
-    """
-    Interactive chat copilot with session history, grounded across selected
-    documents, Qdrant semantic RAG retrieval, and dynamic model auto-routing.
-    """
     message = (payload.message or "").strip()
     session_id = payload.session_id or str(uuid.uuid4())
     selected_doc_ids = payload.selected_doc_ids or []
@@ -385,10 +443,8 @@ async def chat_endpoint(payload: ChatRequest):
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")
 
-    # 1. Record user turn in DB
     session_db.add_message(session_id, "user", message)
 
-    # 2. Fetch full session history
     history = session_db.get_history(session_id)
     if payload.history and len(payload.history) > len(history):
         history = payload.history
@@ -397,7 +453,6 @@ async def chat_endpoint(payload: ChatRequest):
     reply: str = ""
     rag_res: Dict[str, Any] = {}
 
-    # 3. Retrieve relevant sovereign chunks from Qdrant first
     rag_context = ""
     try:
         rag_res = rag_service.generate_response(query=message, history=history)
@@ -407,12 +462,10 @@ async def chat_endpoint(payload: ChatRequest):
     except Exception as rag_err:
         print(f"[RAG Retrieval Warning]: {rag_err}")
 
-    # 4. Merge incoming document context with retrieved RAG context
     combined_doc_context = payload.document_context or ""
     if rag_context:
         combined_doc_context = f"{combined_doc_context}\n\nRetrieved Knowledge:\n{rag_context}".strip()
 
-    # 5. Resolve active model (Auto selection or explicit user choice)
     if requested_model == "auto":
         resolved_model = select_optimal_model(
             query=message,
@@ -422,7 +475,6 @@ async def chat_endpoint(payload: ChatRequest):
     else:
         resolved_model = requested_model
 
-    # 6. Execute LangGraph Agent reasoning with the resolved model
     try:
         reply = chat_agent_reason(
             message=message,
@@ -432,7 +484,6 @@ async def chat_endpoint(payload: ChatRequest):
             model_name=resolved_model
         )
 
-        # Guard against generic deflection if agent ignored context
         if not reply or "unable to provide" in reply.lower() or "without access to" in reply.lower():
             if rag_res and rag_res.get("response"):
                 reply = rag_res.get("response")
@@ -450,11 +501,9 @@ async def chat_endpoint(payload: ChatRequest):
             print(f"[Critical RAG Fallback Error]: {fallback_err}")
             reply = "Unable to process the query against local sovereign models. Please verify engine status."
 
-    # 7. Clean up internal Chain-of-Thought tags if deepseek-r1 was used
     if reply and "<think>" in reply and "</think>" in reply:
         reply = re.sub(r"<think>.*?</think>", "", reply, flags=re.DOTALL).strip()
 
-    # 8. Record assistant turn in DB
     session_db.add_message(session_id, "assistant", reply)
 
     return ChatResponse(
@@ -464,16 +513,31 @@ async def chat_endpoint(payload: ChatRequest):
         resolved_model=resolved_model
     )
 
-# Endpoint 4: Execution Task - POST /api/tasks/execute
+# Tier 2 Secure Sandbox Code Execution - POST /api/sandbox/execute
+@app.post("/api/sandbox/execute", response_model=SandboxExecResponse)
+async def sandbox_execute_endpoint(payload: SandboxExecRequest):
+    """
+    Executes Python integrity calculations inside the isolated AST-verified sandbox.
+    """
+    try:
+        verify_code_safety(payload.code)
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+
+    result = execute_in_sandbox(payload.code)
+    return SandboxExecResponse(
+        stdout=result.get("stdout", ""),
+        stderr=result.get("stderr", ""),
+        exit_code=result.get("exit_code", 0),
+        timed_out=result.get("timed_out", False)
+    )
+
+# Execution Task - POST /api/tasks/execute
 @app.post("/api/tasks/execute")
 async def execute_task(
     file: Optional[UploadFile] = File(None),
     task_prompt: Optional[str] = Form(None)
 ):
-    """
-    Runs the single LangGraph agent pipeline to calculate mechanical integrity,
-    verify API/OISD standards in sandbox, and stream back the generated .docx Approval Note.
-    """
     prompt_text = task_prompt or "Perform API 570 ultrasonic wall thickness inspection and generate Approval Note"
     saved_file_path = None
 
@@ -484,7 +548,6 @@ async def execute_task(
         with open(saved_file_path, "wb") as f:
             f.write(file_bytes)
 
-    # Run Single LangGraph Agent Task
     final_state = run_agent_task(
         input_text=prompt_text,
         file_path=saved_file_path
@@ -497,7 +560,7 @@ async def execute_task(
         docx_path = generate_mrpl_approval_note({
             "equipment_tag": "E-101",
             "findings": f"Automated inspection assessment executed for: {prompt_text}",
-            "calculation_summary": "Integrity calculation executed and verified.",
+            "calculation_summary": "Integrity calculation executed and verified via Tier-2 Sandbox.",
             "recommendation": "Maintain scheduled ultrasonic inspection monitoring."
         })
 
@@ -534,10 +597,11 @@ async def download_file(filename: str):
 if __name__ == "__main__":
     import uvicorn
     print("==================================================================")
-    print(f"  SOVEREIGN FASTAPI WORKBENCH - LANGGRAPH & RAG SERVICE")
+    print("  SOVEREIGN FASTAPI WORKBENCH - LANGGRAPH, RAG & DUAL FIREWALLS")
     print(f"  Listening on http://{API_HOST}:{API_PORT}")
     print(f"  Qdrant Target: {QDRANT_HOST}:{QDRANT_PORT} (Collection: {QDRANT_COLLECTION})")
     print(f"  Inference: {VLLM_BASE_URL} ({VLLM_MODEL_NAME})")
-    print(f"  Database URL: {DATABASE_URL}")
+    print("  Tier 1 Firewall: ACTIVE (Zero-WAN DNS & Socket Egress Jail)")
+    print("  Tier 2 Sandbox:  ACTIVE (AST Analysis & Subprocess Isolation)")
     print("==================================================================")
     uvicorn.run(app, host=API_HOST, port=API_PORT)

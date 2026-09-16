@@ -1,11 +1,17 @@
-from huggingface_hub.utils import endpoint_helpers
-from huggingface_hub.utils import endpoint_helpers
 import os
+import uuid
 from typing import List, Dict, Any
+
+# ==============================================================================
+# ENFORCE LOCAL OFFLINE SOVEREIGN AIR-GAP
+# ==============================================================================
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-import uuid
 from qdrant_client.http.models import PointStruct
+
 
 class QdrantRetriever:
     def __init__(
@@ -21,16 +27,19 @@ class QdrantRetriever:
         self.threshold = threshold
         self.top_k = top_k
 
-        # Initialize Qdrant Client
+        # Initialize Qdrant Client (Loopback / Local Host)
         self.client = QdrantClient(host=self.host, port=self.port)
         
-        # Load local cached BGE-M3
-        self.model = SentenceTransformer(model_name)
+        # Load exclusively from local Hugging Face disk cache
+        try:
+            self.model = SentenceTransformer(model_name, local_files_only=True)
+        except Exception:
+            # Fallback for models referenced via custom local folder paths
+            self.model = SentenceTransformer(model_name)
 
     def retrieve(self, query: str) -> List[Dict[str, Any]]:
         query_vector = self.model.encode(query).tolist()
 
-        # Handle qdrant-client version differences: query_points vs search
         hits = []
         if hasattr(self.client, "query_points"):
             response = self.client.query_points(
@@ -60,11 +69,15 @@ class QdrantRetriever:
         return results
 
     def ingest_text_chunks(self, text: str, source_name: str, chunk_size: int = 500, overlap: int = 50):
-        from app.rag.chunker import chunk_text  # or your teammate's chunker function
-    
-        chunks = chunk_text(text) if callable(globals().get("chunk_text")) else [text]
+        try:
+            from app.rag.chunker import chunk_text
+            chunks = chunk_text(text)
+        except Exception:
+            chunks = [c.strip() for c in text.split("\n\n") if c.strip()]
+            if not chunks:
+                chunks = [text]
+
         points = []
-    
         for idx, chunk in enumerate(chunks):
             vector = self.model.encode(chunk).tolist()
             point_id = str(uuid.uuid4())
@@ -76,7 +89,6 @@ class QdrantRetriever:
             points.append(PointStruct(id=point_id, vector=vector, payload=payload))
         
         if points:
-        
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points,
