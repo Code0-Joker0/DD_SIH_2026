@@ -25,11 +25,12 @@ const generateToken = (user) => {
 
 /**
  * POST /api/auth/register
- * Register a new enterprise user with 12-round bcrypt hash
+ * Register a new enterprise user.
+ * Note: Multiple users CAN have the same role and department. Only email and username are unique.
  */
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password, full_name, role = 'employee', department = 'Engineering' } = req.body;
+    const { username, email, password, full_name, role = 'engineer', department = 'Engineering' } = req.body;
 
     if (!username || !email || !password || !full_name) {
       return res.status(400).json({
@@ -45,29 +46,48 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Check if user already exists
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 1. Check if unique identity fields (email or username) already exist
     const existing = await db.query(
-      'SELECT id FROM users WHERE email = $1',
-      [email.toLowerCase()]
+      'SELECT username, email FROM users WHERE LOWER(email) = $1 OR LOWER(username) = $2 LIMIT 1',
+      [cleanEmail, cleanUsername]
     );
 
     if (existing.rows.length > 0) {
-      return res.status(409).json({
-        status: 'error',
-        message: 'An enterprise account with this email already exists'
-      });
+      const match = existing.rows[0];
+      const isUsernameTaken = match.username.toLowerCase() === cleanUsername;
+      const isEmailTaken = match.email.toLowerCase() === cleanEmail;
+
+      if (isUsernameTaken && isEmailTaken) {
+        return res.status(409).json({
+          status: 'error',
+          message: 'Both this Badge ID / Username and Email are already registered.'
+        });
+      } else if (isUsernameTaken) {
+        return res.status(409).json({
+          status: 'error',
+          message: `Badge ID / Username "${username}" is already assigned to an engineer. Please use your unique badge number.`
+        });
+      } else {
+        return res.status(409).json({
+          status: 'error',
+          message: `Email "${email}" is already registered. Please sign in instead.`
+        });
+      }
     }
 
-    // Hash password with bcrypt (12 salt rounds)
+    // 2. Hash password with bcrypt (12 salt rounds)
     const saltRounds = 12;
     const password_hash = await bcrypt.hash(password, saltRounds);
 
-    // Insert user into PostgreSQL
+    // 3. Insert user into PostgreSQL (role and department can be identical across users)
     const result = await db.query(
       `INSERT INTO users (username, email, password_hash, full_name, role, department, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'active')
        RETURNING id, username, email, full_name, role, department, created_at`,
-      [username.trim(), email.toLowerCase().trim(), password_hash, full_name.trim(), role, department]
+      [cleanUsername, cleanEmail, password_hash, full_name.trim(), role.trim(), department.trim()]
     );
 
     const newUser = result.rows[0];
@@ -80,6 +100,15 @@ router.post('/register', async (req, res) => {
       user: newUser
     });
   } catch (error) {
+    // Catch PostgreSQL code 23505 (unique_violation)
+    if (error.code === '23505') {
+      const field = error.constraint?.includes('username') ? 'Username / Badge ID' : 'Email address';
+      return res.status(409).json({
+        status: 'error',
+        message: `${field} is already in use. Please enter a different one.`
+      });
+    }
+
     console.error('Registration Error:', error);
     return res.status(500).json({
       status: 'error',
@@ -104,9 +133,11 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    const cleanEmail = email.toLowerCase().trim();
+
     const result = await db.query(
-      'SELECT id, username, email, password_hash, full_name, role, department, status FROM users WHERE email = $1',
-      [email.toLowerCase().trim()]
+      'SELECT id, username, email, password_hash, full_name, role, department, status FROM users WHERE LOWER(email) = $1',
+      [cleanEmail]
     );
 
     if (result.rows.length === 0) {
@@ -160,7 +191,7 @@ router.post('/login', async (req, res) => {
 
 /**
  * POST /api/auth/demo-login
- * Quick 1-click SSO sign-in as default authorized enterprise engineer (Reva Kulkarni)
+ * Quick 1-click sign-in for dev testing
  */
 router.post('/demo-login', async (req, res) => {
   try {

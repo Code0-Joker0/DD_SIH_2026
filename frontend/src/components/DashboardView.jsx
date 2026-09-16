@@ -21,7 +21,8 @@ import {
   AlertTriangle,
   Clock,
   FileText,
-  LogOut
+  LogOut,
+  Loader2
 } from 'lucide-react';
 import KnowledgeView from './KnowledgeView';
 import HistoryView from './HistoryView';
@@ -29,7 +30,9 @@ import SettingsView from './SettingsView';
 import DocumentsView from './DocumentsView';
 import ConversationWorkspaceView from './ConversationWorkspaceView';
 import AdminConsoleView from './admin/AdminConsoleView';
+import LoginCard from './LoginCard';
 import { useTheme } from '../context/useTheme';
+import { useAuth } from '../context/AuthContext';
 import { INITIAL_CHATS, INITIAL_SOURCE_FILES } from '../data/chatStore';
 import { sendChatMessage, uploadRAGDocument } from '../utils/api';
 
@@ -48,8 +51,10 @@ const createBlankChat = () => ({
   messages: []
 });
 
-export default function DashboardView({ user, onSignOut }) {
+export default function DashboardView() {
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
   const { effectiveTheme, toggleQuickTheme } = useTheme();
+
   const [workspaceMode, setWorkspaceMode] = useState('user'); // 'user' | 'admin'
   const [activeTab, setActiveTab] = useState('Chat'); // 'Chat' | 'Knowledge' | 'Documents' | 'History' | 'Settings'
 
@@ -83,7 +88,91 @@ export default function DashboardView({ user, onSignOut }) {
   // Active chat object lookup
   const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
 
-  // Handler: Start New Chat
+  // -------------------------------------------------------------
+  // PATTERN A: GATE GUARDS
+  // -------------------------------------------------------------
+
+  // 1. Session check in progress
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#090D16',
+          color: '#E2E8F0',
+          gap: '1rem'
+        }}
+      >
+        <Loader2 className="animate-spin text-cyan-400" size={32} style={{ color: '#38BDF8' }} />
+        <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', letterSpacing: '0.08em', color: '#94A3B8' }}>
+          INITIALIZING SOVEREIGN WORKBENCH...
+        </span>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated: Full-screen Pattern A Login Card Gate
+  if (!isAuthenticated) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: '#090D16'
+        }}
+      >
+        <header className="dash-topbar">
+          <div className="dash-brand-new">
+            <div className="dash-brand-icon-new">
+              <Shield size={18} strokeWidth={2.2} />
+            </div>
+            <div className="dash-brand-text">
+              <span className="brand-primary font-bold">SOVEREIGN AI</span>
+              <span className="brand-secondary font-sans">WorkBench</span>
+            </div>
+          </div>
+
+          <div className="local-processing-pill font-mono">
+            <span className="green-dot"></span>
+            <span>Air-Gapped Access</span>
+          </div>
+
+          <div className="dash-top-right-new">
+            <button
+              type="button"
+              className="icon-btn-box"
+              onClick={toggleQuickTheme}
+              title="Switch Theme"
+            >
+              {effectiveTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+          </div>
+        </header>
+
+        <main
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '2rem'
+          }}
+        >
+          <LoginCard />
+        </main>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // AUTHENTICATED OPERATIONAL WORKSPACE
+  // -------------------------------------------------------------
+
   const handleStartNewChat = () => {
     const newChatObj = createBlankChat();
     setChats(prev => [newChatObj, ...prev]);
@@ -91,7 +180,6 @@ export default function DashboardView({ user, onSignOut }) {
     setActiveTab('Chat');
   };
 
-  // Live Agent Handler: Send Message to Node Gateway & FastAPI/Ollama
   const handleSendMessage = async ({ prompt, attachedFiles = [], sourcesCount = 0, selectedModel = 'auto' }) => {
     if (!activeChatId || !prompt?.trim()) return;
 
@@ -110,14 +198,12 @@ export default function DashboardView({ user, onSignOut }) {
       selectedSourcesCount: sourcesCount
     };
 
-    // Auto-derive title if first message
     const currentChat = chats.find(c => c.id === targetChatId);
     const isFirstMsg = !currentChat?.messages || currentChat.messages.length === 0;
     const generatedTitle = isFirstMsg
       ? (prompt.length > 28 ? `${prompt.slice(0, 28)}...` : prompt)
       : currentChat?.title;
 
-    // Temporary streaming/progress placeholder
     const pendingAiMessage = {
       id: aiMsgId,
       sender: 'ai',
@@ -148,7 +234,6 @@ export default function DashboardView({ user, onSignOut }) {
       }
     };
 
-    // 1. Immediately append User Message and Pending AI Card
     setChats(prev => prev.map(chat => {
       if (chat.id === targetChatId) {
         return {
@@ -162,7 +247,6 @@ export default function DashboardView({ user, onSignOut }) {
     }));
 
     try {
-      // 2. Upload any attached files to RAG ingestion if present
       if (attachedFiles && attachedFiles.length > 0) {
         for (const fileItem of attachedFiles) {
           if (fileItem instanceof File || fileItem?.rawFile instanceof File) {
@@ -178,7 +262,6 @@ export default function DashboardView({ user, onSignOut }) {
         }
       }
 
-      // 3. Dispatch prompt to Node Gateway (/api/chat) with direct fallback
       const docIds = currentChat?.selectedSourceDocumentIds || [];
       const data = await sendChatMessage(prompt, targetChatId, docIds, selectedModel);
 
@@ -189,7 +272,6 @@ export default function DashboardView({ user, onSignOut }) {
         ? data.sources.map(s => typeof s === 'string' ? s : s.filename || s.title || 'Referenced Document')
         : INITIAL_SOURCE_FILES.slice(0, Math.min(sourcesCount || 2, 3)).map(d => d.name);
 
-      // 4. Update the AI response message with complete results
       setChats(prev => prev.map(chat => {
         if (chat.id === targetChatId) {
           return {
@@ -243,7 +325,6 @@ export default function DashboardView({ user, onSignOut }) {
       console.error('[CHAT ENGINE ERROR]:', err);
       const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(2);
 
-      // Render clean diagnostic failure message in the UI
       setChats(prev => prev.map(chat => {
         if (chat.id === targetChatId) {
           return {
@@ -290,7 +371,6 @@ export default function DashboardView({ user, onSignOut }) {
     }
   };
 
-  // Handler: Chat Actions Menu
   const handlePinChat = (chatId) => {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, pinned: !c.pinned } : c));
     setOpenChatMenuId(null);
@@ -330,7 +410,6 @@ export default function DashboardView({ user, onSignOut }) {
     setDeletingChatId(null);
   };
 
-  // Filtered Chats
   const filteredChats = chats.filter(c =>
     !c.archived && c.title.toLowerCase().includes(chatSearchQuery.toLowerCase())
   );
@@ -339,15 +418,24 @@ export default function DashboardView({ user, onSignOut }) {
   const recentChats = filteredChats.filter(c => !c.pinned && (c.createdDate?.includes('Today') || c.createdDate?.includes('Just now') || c.createdDate?.includes('Yesterday')));
   const olderChats = filteredChats.filter(c => !c.pinned && !c.createdDate?.includes('Today') && !c.createdDate?.includes('Just now') && !c.createdDate?.includes('Yesterday'));
 
-  // Render Admin Console if Admin Mode is active
   if (workspaceMode === 'admin') {
     return (
       <AdminConsoleView
         onExitAdmin={() => setWorkspaceMode('user')}
-        onSignOut={onSignOut}
+        onSignOut={logout}
       />
     );
   }
+
+  // Derive user initials & displayName
+  const displayName = user?.full_name || user?.username || 'Inspection Engineer';
+  const displayDepartment = user?.department || user?.role || 'Asset Integrity';
+  const userInitials = displayName
+    .split(' ')
+    .map(n => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'EN';
 
   return (
     <div className="dashboard-container font-sans">
@@ -370,7 +458,7 @@ export default function DashboardView({ user, onSignOut }) {
         </div>
 
         <div className="dash-top-right-new">
-          {/* Admin Console Switcher Button */}
+          {/* Admin Switcher Button */}
           <button
             type="button"
             className="admin-switch-btn font-mono"
@@ -397,23 +485,23 @@ export default function DashboardView({ user, onSignOut }) {
             <span className="bell-red-dot"></span>
           </div>
 
-          {/* User Profile Badge */}
+          {/* User Profile Badge (Click to Sign Out) */}
           <div
             className="user-profile-badge-new"
             onClick={() => {
-              if (window.confirm(`Sign out of enterprise session for ${user?.full_name || 'Reva Kulkarni'}?`)) {
-                onSignOut();
+              if (window.confirm(`Sign out of enterprise session for ${displayName}?`)) {
+                logout();
               }
             }}
             title="Click to Sign Out"
             style={{ cursor: 'pointer' }}
           >
             <div className="avatar-circle-purple font-mono">
-              {user?.full_name ? user.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'RK'}
+              {userInitials}
             </div>
             <div className="user-meta-info">
-              <span className="user-full-name">{user?.full_name || 'Reva Kulkarni'}</span>
-              <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{user?.department || 'Industrial Systems'}</span>
+              <span className="user-full-name">{displayName}</span>
+              <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{displayDepartment}</span>
             </div>
             <LogOut size={13} className="user-dropdown-arrow" style={{ marginLeft: '4px' }} />
           </div>
@@ -424,10 +512,7 @@ export default function DashboardView({ user, onSignOut }) {
       <div className="dash-body">
         {/* Left Navigation Sidebar */}
         <aside className="dash-sidebar chatgpt-style-sidebar">
-
-          {/* Top Primary Actions */}
           <div className="sidebar-top-section">
-            {/* Prominent New Chat Button */}
             <button
               type="button"
               className="sidebar-new-chat-btn font-mono"
@@ -437,7 +522,6 @@ export default function DashboardView({ user, onSignOut }) {
               <span>New Chat</span>
             </button>
 
-            {/* Nav Links */}
             <nav className="sidebar-nav">
               <button
                 className={`nav-item ${activeTab === 'Chat' ? 'active' : ''}`}
@@ -483,7 +567,7 @@ export default function DashboardView({ user, onSignOut }) {
 
           <div className="sidebar-divider"></div>
 
-          {/* CHATGPT-STYLE CHAT HISTORY SECTION */}
+          {/* CHATGPT-STYLE CHAT HISTORY */}
           <div className="chat-history-sidebar-section font-sans">
             <div className="chat-search-box">
               <Search size={14} className="search-icon" />
@@ -527,7 +611,6 @@ export default function DashboardView({ user, onSignOut }) {
             </div>
           </div>
 
-          {/* Bottom Security Banner */}
           <div className="sidebar-security-subtle font-mono">
             <Lock size={12} className="lock-icon" />
             <span>Confidential & Secure</span>
@@ -566,7 +649,7 @@ export default function DashboardView({ user, onSignOut }) {
           )}
 
           {activeTab === 'Settings' && (
-            <SettingsView onSignOut={onSignOut} />
+            <SettingsView onSignOut={logout} />
           )}
 
           {activeTab === 'Chat' && (
@@ -629,7 +712,6 @@ export default function DashboardView({ user, onSignOut }) {
     </div>
   );
 
-  // Helper render for single chat item in sidebar
   function renderChatItem(chat) {
     const isActive = activeTab === 'Chat' && activeChatId === chat.id;
     const isMenuOpen = openChatMenuId === chat.id;
@@ -652,7 +734,6 @@ export default function DashboardView({ user, onSignOut }) {
 
         {chat.pinned && <Pin size={11} className="pinned-icon-badge" />}
 
-        {/* Action Button Menu */}
         <div className="chat-item-actions-wrapper" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"

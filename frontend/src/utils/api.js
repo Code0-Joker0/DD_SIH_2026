@@ -7,11 +7,17 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const BACKEND_FALLBACK = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
 
 /**
- * Token Storage Helpers
+ * Token Storage Helpers (unified with AuthContext)
  */
-export const getToken = () => localStorage.getItem('auth_token');
-export const setToken = (token) => localStorage.setItem('auth_token', token);
-export const removeToken = () => localStorage.removeItem('auth_token');
+export const getToken = () => localStorage.getItem('auth_token') || localStorage.getItem('mrpl_auth_token');
+export const setToken = (token) => {
+  localStorage.setItem('auth_token', token);
+  localStorage.setItem('mrpl_auth_token', token);
+};
+export const removeToken = () => {
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('mrpl_auth_token');
+};
 
 export const getStoredUser = () => {
   try {
@@ -72,16 +78,54 @@ export async function loginUser(email, password) {
     throw new Error(data.message || 'Authentication failed');
   }
 
-  if (data.token) {
-    setToken(data.token);
-    setStoredUser(data.user);
+  const resolvedToken = data.token;
+  const resolvedUser = data.user || data.data?.user;
+
+  if (resolvedToken) {
+    setToken(resolvedToken);
+  }
+  if (resolvedUser) {
+    setStoredUser(resolvedUser);
   }
 
-  return data;
+  return { ...data, user: resolvedUser, token: resolvedToken };
 }
 
 /**
- * 2. Instant 1-Click Demo SSO Login (Reva Kulkarni)
+ * 2. Register / Enroll Inspection Engineer
+ */
+export async function registerUser({ username, full_name, email, password, role = 'engineer' }) {
+  const res = await authFetch('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({
+      username,
+      full_name: full_name || username,
+      email,
+      password,
+      role
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Registration failed');
+  }
+
+  const resolvedToken = data.token;
+  const resolvedUser = data.user || data.data?.user;
+
+  if (resolvedToken) {
+    setToken(resolvedToken);
+  }
+  if (resolvedUser) {
+    setStoredUser(resolvedUser);
+  }
+
+  return { ...data, user: resolvedUser, token: resolvedToken };
+}
+
+/**
+ * 3. Instant 1-Click Demo SSO Login (Fallback / Dev Mode)
  */
 export async function demoLoginUser() {
   const res = await authFetch('/api/auth/demo-login', {
@@ -90,27 +134,37 @@ export async function demoLoginUser() {
 
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.message || 'Demo SSO sign-in failed');
+    throw new Error(data.message || 'Demo sign-in failed');
   }
 
-  if (data.token) {
-    setToken(data.token);
-    setStoredUser(data.user);
+  const resolvedToken = data.token;
+  const resolvedUser = data.user || data.data?.user;
+
+  if (resolvedToken) {
+    setToken(resolvedToken);
+  }
+  if (resolvedUser) {
+    setStoredUser(resolvedUser);
   }
 
   return data;
 }
 
 /**
- * 3. Logout User & Clear Session
+ * 4. Logout User & Clear Session
  */
-export function logoutUser() {
+export async function logoutUser() {
+  try {
+    await authFetch('/api/auth/logout', { method: 'POST' });
+  } catch (_) {
+    // Ignore network failures on client logout
+  }
   removeToken();
   removeStoredUser();
 }
 
 /**
- * 4. Get Current User Profile from JWT
+ * 5. Get Current User Profile from JWT
  */
 export async function getCurrentUser() {
   const token = getToken();
@@ -119,20 +173,22 @@ export async function getCurrentUser() {
   try {
     const res = await authFetch('/api/auth/me');
     if (!res.ok) {
-      logoutUser();
+      removeToken();
+      removeStoredUser();
       return null;
     }
     const data = await res.json();
-    setStoredUser(data.user);
-    return data.user;
+    const resolvedUser = data.user || data.data?.user || data;
+    setStoredUser(resolvedUser);
+    return resolvedUser;
   } catch (err) {
-    console.warn('Failed to verify user session:', err);
+    console.warn('Failed to verify user session with gateway:', err.message);
     return getStoredUser();
   }
 }
 
 /**
- * 5. Fetch Encrypted Company Files from PostgreSQL Storage
+ * 6. Fetch Encrypted Company Files from PostgreSQL Storage
  */
 export async function getCompanyFiles({ category, search, department } = {}) {
   const params = new URLSearchParams();
@@ -153,7 +209,7 @@ export async function getCompanyFiles({ category, search, department } = {}) {
 }
 
 /**
- * 6. Upload and Encrypt File with AES-256-GCM + SHA-256
+ * 7. Upload and Encrypt File with AES-256-GCM + SHA-256
  */
 export async function uploadCompanyFile(file, { department, category, isCompanyWide = true } = {}) {
   const formData = new FormData();
@@ -176,7 +232,7 @@ export async function uploadCompanyFile(file, { department, category, isCompanyW
 }
 
 /**
- * 7. Stream and Decrypt File on the Fly
+ * 8. Stream and Decrypt File on the Fly
  */
 export async function downloadCompanyFile(fileId, filename = 'downloaded_file') {
   const res = await authFetch(`/api/files/${fileId}/download`);
@@ -196,7 +252,7 @@ export async function downloadCompanyFile(fileId, filename = 'downloaded_file') 
 }
 
 /**
- * 8. Delete File from Storage & Audit Log
+ * 9. Delete File from Storage & Audit Log
  */
 export async function deleteCompanyFile(fileId) {
   const res = await authFetch(`/api/files/${fileId}`, {
@@ -212,7 +268,7 @@ export async function deleteCompanyFile(fileId) {
 }
 
 /**
- * 9. Get File Storage Metrics & Statistics
+ * 10. Get File Storage Metrics & Statistics
  */
 export async function getStorageStats() {
   const res = await authFetch('/api/files/stats/summary');
@@ -225,7 +281,7 @@ export async function getStorageStats() {
 }
 
 /**
- * 10. Fetch Available AI Models from Gateway / Backend
+ * 11. Fetch Available AI Models from Gateway / Backend
  */
 export async function fetchModels() {
   try {
@@ -253,7 +309,7 @@ export async function fetchModels() {
 }
 
 /**
- * 11. Interactive Copilot Chat with Gateway and Fallback
+ * 12. Interactive Copilot Chat with Gateway and Fallback
  */
 export async function sendChatMessage(message, sessionId = 'default_session', selectedDocIds = [], modelName = 'auto') {
   const payload = {
@@ -263,7 +319,7 @@ export async function sendChatMessage(message, sessionId = 'default_session', se
     model_name: modelName || 'auto'
   };
 
-  // 1. Primary: Try Node API Gateway
+  // 1. Primary: Try Node API Gateway (passes auth header automatically)
   try {
     const gatewayRes = await authFetch('/api/chat', {
       method: 'POST',
@@ -293,7 +349,7 @@ export async function sendChatMessage(message, sessionId = 'default_session', se
 }
 
 /**
- * 12. Upload Document to RAG Pipeline
+ * 13. Upload Document to RAG Pipeline
  */
 export async function uploadRAGDocument(file, metadata = {}) {
   const formData = new FormData();
@@ -316,7 +372,7 @@ export async function uploadRAGDocument(file, metadata = {}) {
 }
 
 /**
- * 13. Execute Full Agentic Task & Stream Docx
+ * 14. Execute Full Agentic Task & Stream Docx
  */
 export async function executeAgentTask(taskPrompt, file = null) {
   const formData = new FormData();
@@ -353,6 +409,7 @@ export default {
   removeStoredUser,
   authFetch,
   loginUser,
+  registerUser,
   demoLoginUser,
   logoutUser,
   getCurrentUser,

@@ -11,17 +11,17 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Database configuration
+// Database configuration with dual env fallback (standard PG* and teammate's HOST/DP/DPORT/USER/DB)
 const connectionString = process.env.DATABASE_URL;
 const poolConfig = connectionString ? {
   connectionString,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 } : {
-  host: process.env.PGHOST || 'localhost',
-  port: parseInt(process.env.PGPORT || '5432', 10),
-  user: process.env.PGUSER || 'postgres',
-  password: process.env.PGPASSWORD || 'postgres',
-  database: process.env.PGDATABASE || 'mrpl_db',
+  host: process.env.PGHOST || process.env.HOST || 'localhost',
+  port: parseInt(process.env.PGPORT || process.env.DPORT || '5432', 10),
+  user: process.env.PGUSER || process.env.USER || 'postgres',
+  password: String(process.env.PGPASSWORD || process.env.DP || 'postgres'),
+  database: process.env.PGDATABASE || process.env.DB || 'mrpl_db',
   ssl: false
 };
 
@@ -29,9 +29,10 @@ export const pool = new Pool(poolConfig);
 
 let isPostgresConnected = false;
 
-// Fallback in-memory store if live PostgreSQL is temporarily offline during local dev/air-gapped mode
+// Fallback in-memory store if live PostgreSQL is offline
 export const inMemoryStore = {
   users: [],
+  auth: [], // Added for teammate's auth table simulation
   company_files: [],
   file_audit_logs: []
 };
@@ -51,7 +52,7 @@ export const testConnection = async () => {
     isPostgresConnected = false;
     console.warn('⚠️ PostgreSQL connection unavailable:', error.message);
     console.warn('ℹ️ Running in Resilient In-Memory Mode with identical schema & AES-256-GCM encryption.');
-    console.warn('ℹ️ To connect to live PostgreSQL, configure DATABASE_URL in gateway/.env');
+    console.warn('ℹ️ To connect to live PostgreSQL, verify HOST/DP or DATABASE_URL in gateway/.env');
     return false;
   }
 };
@@ -69,22 +70,81 @@ export const query = async (text, params = []) => {
     }
   }
 
-  // Handle fallback in-memory simulation for development & offline environments
+  // Handle fallback in-memory simulation for offline/dev environments
   return executeInMemoryQuery(text, params);
 };
 
 /**
- * In-memory SQL simulation for core operations (users, company_files, audit logs)
+ * In-memory SQL simulation supporting both legacy users and teammate's auth table
  */
 const executeInMemoryQuery = (text, params = []) => {
   const normalized = text.trim();
 
-  // 1. SELECT count(*) FROM users
+  // -------------------------------------------------------------
+  // 1. TEAMMATE AUTH TABLE HANDLERS
+  // -------------------------------------------------------------
+
+  // Check user existence by username or email: SELECT ... FROM auth WHERE username = $1 [OR email = $2]
+  if (/FROM\s+auth\s+WHERE/i.test(normalized)) {
+    if (/username\s*=\s*\$1\s+OR\s+email\s*=\s*\$2/i.test(normalized)) {
+      const username = (params[0] || '').toLowerCase();
+      const email = (params[1] || '').toLowerCase();
+      const match = inMemoryStore.auth.find(
+        u => (u.username || '').toLowerCase() === username || (u.email || '').toLowerCase() === email
+      );
+      return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
+    }
+
+    if (/username\s*=\s*\$1/i.test(normalized)) {
+      const username = (params[0] || '').toLowerCase();
+      const match = inMemoryStore.auth.find(u => (u.username || '').toLowerCase() === username);
+      return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
+    }
+
+    if (/email\s*=\s*\$1/i.test(normalized)) {
+      const email = (params[0] || '').toLowerCase();
+      const match = inMemoryStore.auth.find(u => (u.email || '').toLowerCase() === email);
+      return { rows: match ? [match] : [], rowCount: match ? 1 : 0 };
+    }
+  }
+
+  // Teammate Auth Register: INSERT INTO auth(username, id, password, email, role)
+  if (/INSERT\s+INTO\s+auth/i.test(normalized)) {
+    const newAuthRecord = {
+      username: params[0],
+      id: params[1] || crypto.randomUUID(),
+      password: params[2], // SHA-256 hash from auth controller
+      email: params[3],
+      role: params[4] || 'engineer',
+      created_at: new Date().toISOString()
+    };
+    inMemoryStore.auth.push(newAuthRecord);
+
+    // Keep legacy users store synced for file vault author attribution
+    inMemoryStore.users.push({
+      id: newAuthRecord.id,
+      username: newAuthRecord.username,
+      email: newAuthRecord.email,
+      password_hash: newAuthRecord.password,
+      full_name: newAuthRecord.username,
+      role: newAuthRecord.role,
+      department: 'Asset Integrity',
+      status: 'active',
+      created_at: newAuthRecord.created_at,
+      updated_at: newAuthRecord.created_at
+    });
+
+    return { rows: [newAuthRecord], rowCount: 1 };
+  }
+
+  // -------------------------------------------------------------
+  // 2. LEGACY USERS TABLE HANDLERS
+  // -------------------------------------------------------------
+
   if (/SELECT\s+count\(\*\)\s+FROM\s+users/i.test(normalized)) {
     return { rows: [{ count: inMemoryStore.users.length.toString() }], rowCount: 1 };
   }
 
-  // 2. SELECT users by email or id or all users
   if (/FROM\s+users\s+WHERE\s+email\s*=\s*\$1/i.test(normalized)) {
     const email = params[0];
     const user = inMemoryStore.users.find(u => u.email.toLowerCase() === (email || '').toLowerCase());
@@ -101,7 +161,6 @@ const executeInMemoryQuery = (text, params = []) => {
     return { rows: [...inMemoryStore.users], rowCount: inMemoryStore.users.length };
   }
 
-  // 3. INSERT into users
   if (/INSERT\s+INTO\s+users/i.test(normalized)) {
     const newUser = {
       id: crypto.randomUUID(),
@@ -119,7 +178,10 @@ const executeInMemoryQuery = (text, params = []) => {
     return { rows: [newUser], rowCount: 1 };
   }
 
-  // 4. INSERT into company_files
+  // -------------------------------------------------------------
+  // 3. COMPANY FILES & ENCRYPTED VAULT HANDLERS
+  // -------------------------------------------------------------
+
   if (/INSERT\s+INTO\s+company_files/i.test(normalized)) {
     const newFile = {
       id: crypto.randomUUID(),
@@ -146,32 +208,13 @@ const executeInMemoryQuery = (text, params = []) => {
     return { rows: [newFile], rowCount: 1 };
   }
 
-  // 5. SELECT company_files (Listing)
   if (/FROM\s+company_files/i.test(normalized) && !/WHERE\s+(f\.)?id\s*=\s*\$1/i.test(normalized)) {
     let files = inMemoryStore.company_files.map(f => {
       const uploader = inMemoryStore.users.find(u => u.id === f.uploaded_by);
       return {
-        id: f.id,
-        filename: f.filename,
-        original_name: f.original_name,
-        mime_type: f.mime_type,
-        file_size: f.file_size,
-        encrypted_size: f.encrypted_size,
-        encrypted_data: f.encrypted_data,
-        encryption_algorithm: f.encryption_algorithm,
-        encryption_iv: f.encryption_iv,
-        encryption_auth_tag: f.encryption_auth_tag,
-        checksum_sha256: f.checksum_sha256,
-        uploaded_by: f.uploaded_by,
-        uploader_name: uploader ? uploader.full_name : 'Enterprise User',
-        uploader_email: uploader ? uploader.email : null,
-        department: f.department,
-        category: f.category,
-        status: f.status,
-        is_company_wide: f.is_company_wide,
-        metadata: f.metadata,
-        created_at: f.created_at,
-        updated_at: f.updated_at
+        ...f,
+        uploader_name: uploader ? uploader.full_name : 'Inspection Engineer',
+        uploader_email: uploader ? uploader.email : null
       };
     });
 
@@ -179,22 +222,22 @@ const executeInMemoryQuery = (text, params = []) => {
     return { rows: files, rowCount: files.length };
   }
 
-  // 6. SELECT company_files by ID
   if (/FROM\s+company_files/i.test(normalized) && /WHERE\s+(f\.)?id\s*=\s*\$1/i.test(normalized)) {
     const id = params[0];
     const file = inMemoryStore.company_files.find(f => f.id === id);
     if (!file) return { rows: [], rowCount: 0 };
 
     const uploader = inMemoryStore.users.find(u => u.id === file.uploaded_by);
-    const enriched = {
-      ...file,
-      uploader_name: uploader ? uploader.full_name : 'Enterprise User',
-      uploader_email: uploader ? uploader.email : null
+    return {
+      rows: [{
+        ...file,
+        uploader_name: uploader ? uploader.full_name : 'Inspection Engineer',
+        uploader_email: uploader ? uploader.email : null
+      }],
+      rowCount: 1
     };
-    return { rows: [enriched], rowCount: 1 };
   }
 
-  // 7. DELETE from company_files
   if (/DELETE\s+FROM\s+company_files\s+WHERE\s+id\s*=\s*\$1/i.test(normalized)) {
     const id = params[0];
     const idx = inMemoryStore.company_files.findIndex(f => f.id === id);
@@ -205,7 +248,6 @@ const executeInMemoryQuery = (text, params = []) => {
     return { rows: [], rowCount: 0 };
   }
 
-  // 8. INSERT into file_audit_logs
   if (/INSERT\s+INTO\s+file_audit_logs/i.test(normalized)) {
     const log = {
       id: inMemoryStore.file_audit_logs.length + 1,
@@ -226,28 +268,36 @@ const executeInMemoryQuery = (text, params = []) => {
 };
 
 /**
- * Initialize Database Tables from schema.sql
+ * Initialize Database Tables from schema.sql & create auth table if missing
  */
 export const initDatabase = async () => {
   const schemaPath = path.join(__dirname, '..', 'schema.sql');
-  if (!fs.existsSync(schemaPath)) {
-    console.error('schema.sql not found at:', schemaPath);
-    return false;
-  }
-
-  const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+  const schemaSql = fs.existsSync(schemaPath) ? fs.readFileSync(schemaPath, 'utf8') : '';
 
   if (isPostgresConnected) {
     try {
-      await pool.query(schemaSql);
-      console.log('✅ PostgreSQL Schema initialized successfully');
+      if (schemaSql) {
+        await pool.query(schemaSql);
+      }
+      // Ensure teammate's auth table exists
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS auth (
+          username VARCHAR(100) UNIQUE NOT NULL,
+          id VARCHAR(100) PRIMARY KEY,
+          password VARCHAR(255) NOT NULL,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          role VARCHAR(50) DEFAULT 'engineer',
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      console.log('✅ PostgreSQL Schema & Auth tables verified successfully');
       return true;
     } catch (err) {
       console.error('Failed to initialize PostgreSQL schema:', err.message);
       return false;
     }
   } else {
-    console.log('ℹ️ In-memory data store ready with Singularity AI schema.');
+    console.log('ℹ️ In-memory data store ready for Auth and Vault operations.');
     return true;
   }
 };

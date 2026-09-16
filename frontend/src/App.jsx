@@ -1,57 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Navbar from './components/Navbar';
 import LeftPanel from './components/LeftPanel';
 import LoginCard from './components/LoginCard';
 import DashboardView from './components/DashboardView';
 import SupportModal from './components/SupportModal';
 import { ThemeProvider } from './context/ThemeContext';
-import { getCurrentUser, logoutUser } from './utils/api';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
-export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState(null);
+function MainApp() {
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
   const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(true);
 
-  // Validate existing session on mount
-  useEffect(() => {
-    let isMounted = true;
-
-    const initAuth = async () => {
-      try {
-        const currentUser = await getCurrentUser();
-        if (isMounted && currentUser) {
-          setUser(currentUser);
-          setIsAuthenticated(true);
-        }
-      } catch (err) {
-        console.warn('Session expired or offline:', err);
-      } finally {
-        if (isMounted) {
-          setIsInitializing(false);
-        }
-      }
-    };
-
-    initAuth();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const handleLoginSuccess = (authenticatedUser) => {
-    setUser(authenticatedUser);
-    setIsAuthenticated(true);
-  };
-
-  const handleSignOut = () => {
-    logoutUser();
-    setUser(null);
-    setIsAuthenticated(false);
-  };
-
-  if (isInitializing) {
+  // 1. Session restoration check
+  if (isLoading) {
     return (
       <div
         style={{
@@ -63,7 +24,8 @@ export default function App() {
           background: '#0B0F19',
           color: '#94A3B8',
           fontSize: '0.9rem',
-          fontFamily: 'system-ui, sans-serif'
+          fontFamily: 'monospace',
+          letterSpacing: '0.08em'
         }}
       >
         Initializing Sovereign Workbench...
@@ -71,30 +33,42 @@ export default function App() {
     );
   }
 
+  // 2. Authenticated: Render Enterprise Dashboard
+  if (isAuthenticated) {
+    return (
+      <DashboardView
+        user={user}
+        onSignOut={logout}
+      />
+    );
+  }
+
+  // 3. Unauthenticated: Render Two-Panel Landing Frame
   return (
-    <ThemeProvider>
-      {isAuthenticated ? (
-        <DashboardView
-          user={user}
-          onSignOut={handleSignOut}
-        />
-      ) : (
-        <div className="app-viewport">
-          <div className="software-frame">
-            <Navbar onOpenSupport={() => setIsSupportOpen(true)} />
+    <div className="app-viewport">
+      <div className="software-frame">
+        <Navbar onOpenSupport={() => setIsSupportOpen(true)} />
 
-            <main className="main-layout">
-              <LeftPanel />
-              <LoginCard onLoginSuccess={handleLoginSuccess} />
-            </main>
-          </div>
+        <main className="main-layout">
+          <LeftPanel />
+          <LoginCard />
+        </main>
+      </div>
 
-          <SupportModal
-            isOpen={isSupportOpen}
-            onClose={() => setIsSupportOpen(false)}
-          />
-        </div>
-      )}
-    </ThemeProvider>
+      <SupportModal
+        isOpen={isSupportOpen}
+        onClose={() => setIsSupportOpen(false)}
+      />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <ThemeProvider>
+        <MainApp />
+      </ThemeProvider>
+    </AuthProvider>
   );
 }

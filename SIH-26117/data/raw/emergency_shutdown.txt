@@ -1,9 +1,0 @@
-Emergency Shutdown Procedure
-
-An emergency shutdown should be initiated when unsafe operating
-conditions exceed predefined operating limits.
-
-The affected equipment should be isolated after shutdown.
-Pressure should be verified to have reached a safe state.
-The responsible operations team should be notified.
-The incident should be recorded in the appropriate log.
