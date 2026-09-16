@@ -1,0 +1,12 @@
+[
+  {
+    "id": "0b0d3735-d4d1-4d50-a474-e3e7dad04b08",
+    "username": "mrunal_1",
+    "email": "mrunal@gmail.com",
+    "password_hash": "$2b$12$SGSIGeuDifd1/3OI1ImfX.p/byL8EdtlGvxmGk8w59A3Gw6GO1K92",
+    "full_name": "Mrunal Kolhe",
+    "role": "ndt_technician",
+    "department": "Engineering",
+    "status": "active"
+  }
+]

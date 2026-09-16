@@ -13,6 +13,7 @@ const generateToken = (user) => {
   return jwt.sign(
     {
       userId: user.id,
+      id: user.id,
       email: user.email,
       username: user.username,
       role: user.role,
@@ -26,7 +27,6 @@ const generateToken = (user) => {
 /**
  * POST /api/auth/register
  * Register a new enterprise user.
- * Note: Multiple users CAN have the same role and department. Only email and username are unique.
  */
 router.post('/register', async (req, res) => {
   try {
@@ -82,7 +82,7 @@ router.post('/register', async (req, res) => {
     const saltRounds = 12;
     const password_hash = await bcrypt.hash(password, saltRounds);
 
-    // 3. Insert user into PostgreSQL (role and department can be identical across users)
+    // 3. Insert user into PostgreSQL
     const result = await db.query(
       `INSERT INTO users (username, email, password_hash, full_name, role, department, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'active')
@@ -97,10 +97,16 @@ router.post('/register', async (req, res) => {
       status: 'success',
       message: 'Enterprise account registered successfully',
       token,
-      user: newUser
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        full_name: newUser.full_name,
+        role: newUser.role,
+        department: newUser.department
+      }
     });
   } catch (error) {
-    // Catch PostgreSQL code 23505 (unique_violation)
     if (error.code === '23505') {
       const field = error.constraint?.includes('username') ? 'Username / Badge ID' : 'Email address';
       return res.status(409).json({
@@ -120,24 +126,28 @@ router.post('/register', async (req, res) => {
 
 /**
  * POST /api/auth/login
- * Authenticate with enterprise credentials
+ * Authenticate with enterprise credentials (email or username)
+ * Supports bcrypt hash matching, legacy direct matching, and auto-hash upgrades.
  */
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, username, password } = req.body;
+    const identifier = (email || username || '').toLowerCase().trim();
 
-    if (!email || !password) {
+    if (!identifier || !password) {
       return res.status(400).json({
         status: 'error',
-        message: 'Email and password are required'
+        message: 'Email/Username and password are required'
       });
     }
 
-    const cleanEmail = email.toLowerCase().trim();
-
+    // Lookup by either email or username
     const result = await db.query(
-      'SELECT id, username, email, password_hash, full_name, role, department, status FROM users WHERE LOWER(email) = $1',
-      [cleanEmail]
+      `SELECT id, username, email, password_hash, full_name, role, department, status 
+       FROM users 
+       WHERE LOWER(email) = $1 OR LOWER(username) = $1
+       LIMIT 1;`,
+      [identifier]
     );
 
     if (result.rows.length === 0) {
@@ -149,14 +159,36 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    if (user.status !== 'active') {
+    if (user.status && user.status.toLowerCase() !== 'active') {
       return res.status(403).json({
         status: 'error',
         message: 'Account is inactive or suspended'
       });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+    let isMatch = false;
+
+    // 1. Verify bcrypt hash ($2a$, $2b$, or $2y$)
+    if (user.password_hash && /^\$2[aby]\$\d{2}\$/.test(user.password_hash)) {
+      try {
+        isMatch = await bcrypt.compare(password, user.password_hash);
+      } catch (bcryptErr) {
+        console.warn('[AUTH BCRYPT WARNING]:', bcryptErr.message);
+      }
+    }
+
+    // 2. Direct-match fallback (for test passwords or unhashed seeds)
+    if (!isMatch && user.password_hash === password) {
+      isMatch = true;
+      try {
+        const upgradedHash = await bcrypt.hash(password, 12);
+        await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [upgradedHash, user.id]);
+        console.log(`✅ [AUTH] Auto-upgraded password hash to bcrypt for: ${user.email}`);
+      } catch (upgradeErr) {
+        console.warn('[AUTH HASH UPGRADE WARNING]:', upgradeErr.message);
+      }
+    }
+
     if (!isMatch) {
       return res.status(401).json({
         status: 'error',
@@ -191,7 +223,7 @@ router.post('/login', async (req, res) => {
 
 /**
  * POST /api/auth/demo-login
- * Quick 1-click sign-in for dev testing
+ * Quick 1-click sign-in for testing
  */
 router.post('/demo-login', async (req, res) => {
   try {
@@ -238,10 +270,33 @@ router.post('/demo-login', async (req, res) => {
  * Current session user verification via JWT
  */
 router.get('/me', authenticateToken, async (req, res) => {
-  return res.json({
-    status: 'success',
-    user: req.user
-  });
+  try {
+    const userId = req.user.userId || req.user.id;
+    const result = await db.query(
+      'SELECT id, username, email, full_name, role, department, status, created_at FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'User not found' });
+    }
+
+    const user = result.rows[0];
+    return res.json({
+      status: 'success',
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        full_name: user.full_name,
+        role: user.role,
+        department: user.department,
+        status: user.status
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
 });
 
 export default router;

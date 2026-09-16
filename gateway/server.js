@@ -82,7 +82,7 @@ app.get('/api/models', async (req, res) => {
     }
 });
 
-// Optional network status route for dashboard telemetry
+// Network status route for dashboard telemetry
 app.get('/api/network-status', async (req, res) => {
     try {
         const backendRes = await axios.get(`${FASTAPI_BASE_URL}/api/network-status`, { timeout: 2000 });
@@ -169,7 +169,7 @@ app.post('/api/chat', async (req, res) => {
             document_context: document_context || null,
             model_name: model_name || 'auto'
         }, {
-            timeout: 180000 // 3 minutes timeout to accommodate cold model weight swaps into VRAM
+            timeout: 180000 // 3 minutes timeout for local model switches in VRAM
         });
 
         res.json(response.data);
@@ -227,18 +227,31 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal Gateway Error', message: err.message });
 });
 
-// 12. Boot Gateway Server
-app.listen(GATEWAY_PORT, async () => {
-    console.log(`[GATEWAY] Running on port ${GATEWAY_PORT}`);
-    console.log(`[GATEWAY] Forwarding AI agent & RAG calls to FastAPI at ${FASTAPI_BASE_URL}`);
-
-    // Verify database connection
+// 12. Ordered Startup Lifecycle
+async function startServer() {
     try {
+        console.log('[GATEWAY] Initializing embedded sovereign database engine...');
+
+        // 1. Establish PGlite embedded connection
         if (db && typeof db.testConnection === 'function') {
             await db.testConnection();
-            console.log('[GATEWAY DB] PostgreSQL connection confirmed.');
         }
+
+        // 2. Ensure schema, tables, and default accounts are fully provisioned
+        if (db && typeof db.initDatabase === 'function') {
+            await db.initDatabase();
+            console.log('[GATEWAY DB] Embedded schema verification complete.');
+        }
+
+        // 3. Listen on port only after DB is ready
+        app.listen(GATEWAY_PORT, () => {
+            console.log(`[GATEWAY] Running on port ${GATEWAY_PORT}`);
+            console.log(`[GATEWAY] Forwarding AI agent & RAG calls to FastAPI at ${FASTAPI_BASE_URL}`);
+        });
     } catch (err) {
-        console.error('[GATEWAY DB ERROR]:', err.message);
+        console.error('❌ [GATEWAY BOOTSTRAP FATAL ERROR]:', err);
+        process.exit(1);
     }
-});
+}
+
+startServer();

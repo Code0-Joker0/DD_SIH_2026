@@ -1,22 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Paperclip, 
-  Play, 
-  Check, 
-  ChevronDown, 
-  ChevronRight, 
-  FileText, 
-  FileSpreadsheet, 
-  Download, 
-  Eye, 
-  CheckCircle2, 
-  X, 
-  BookOpen, 
-  CheckSquare, 
+import {
+  Paperclip,
+  Play,
+  ChevronDown,
+  FileText,
+  FileSpreadsheet,
+  Download,
+  X,
+  BookOpen,
+  CheckSquare,
   Square,
   AlertCircle,
   Sparkles,
-  Info
+  Info,
+  ArrowUp,
+  Loader2
 } from 'lucide-react';
 import { INITIAL_SOURCE_FILES } from '../data/chatStore';
 import { executeAgentTask, fetchModels } from '../utils/api';
@@ -53,7 +51,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
   const [promptInput, setPromptInput] = useState('');
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [fileError, setFileError] = useState('');
-  
+
   // Knowledge scope & source selection state
   const [knowledgeScope, setKnowledgeScope] = useState('selected');
   const [selectedSourceIds, setSelectedSourceIds] = useState(['doc_001', 'doc_002', 'doc_005']);
@@ -63,7 +61,6 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
   const [selectedModel, setSelectedModel] = useState('auto');
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
-  const [openExecutionDetailsMap, setOpenExecutionDetailsMap] = useState({});
 
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -99,7 +96,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     return () => { isMounted = false; };
   }, []);
 
-  // Close Model picker when clicking anywhere outside
+  // Close Model picker when clicking outside
   useEffect(() => {
     if (!isModelPickerOpen) return;
 
@@ -123,7 +120,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     }
   }, [activeChat?.id]);
 
-  // Scroll to bottom of message thread
+  // Auto-scroll to bottom of thread
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages?.length]);
@@ -169,7 +166,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
   };
 
   const toggleSelectSourceDoc = (id) => {
-    setSelectedSourceIds((prev) => 
+    setSelectedSourceIds((prev) =>
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
   };
@@ -184,24 +181,16 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     }
   };
 
-  const toggleExecutionDetails = (msgId) => {
-    setOpenExecutionDetailsMap(prev => ({
-      ...prev,
-      [msgId]: !prev[msgId]
-    }));
-  };
-
   const currentModelObj = availableModels.find(m => m.id === selectedModel) || availableModels[0] || DEFAULT_MODELS[0];
 
   const handleFormSubmit = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!promptInput.trim() && attachedFiles.length === 0) return;
 
     const userPrompt = promptInput.trim();
     const currentFiles = [...attachedFiles];
     const sourcesCount = knowledgeScope === 'selected' ? selectedSourceIds.length : (knowledgeScope === 'all' ? INITIAL_SOURCE_FILES.length : 0);
-    
-    // Clear inputs
+
     setPromptInput('');
     setAttachedFiles([]);
     setFileError('');
@@ -221,10 +210,10 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
 
   const isChatEmpty = !activeChat || !activeChat.messages || activeChat.messages.length === 0;
 
-  // Reusable Composer Component
+  // Modernized Composer View with design system tokens
   const renderComposerForm = (isCenteredState = false) => (
     <form onSubmit={handleFormSubmit} className={`composer-form ${isCenteredState ? 'centered-composer-form' : ''}`}>
-      
+
       {/* Attached Files Preview Strip */}
       {attachedFiles.length > 0 && (
         <div className="composer-attachments-strip font-mono">
@@ -233,9 +222,9 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
               <FileText size={13} className="icon-blue" />
               <span className="file-name">{file.name}</span>
               <span className="file-size">{file.size}</span>
-              <button 
-                type="button" 
-                className="remove-pill-btn" 
+              <button
+                type="button"
+                className="remove-pill-btn"
                 onClick={() => removeAttachment(idx)}
               >
                 <X size={12} />
@@ -252,47 +241,50 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
         </div>
       )}
 
-      {/* Main Composer Box with Subtle Neon-Blue Hover & Focus Glow */}
-      <div className="composer-box">
-        <textarea
-          className="composer-textarea font-sans"
-          placeholder="Ask a question or upload files..."
-          value={promptInput}
-          onChange={(e) => setPromptInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleFormSubmit(e);
-            }
-          }}
-          rows={isCenteredState ? 3 : 2}
-        />
+      {/* Composer Box with v2 styling */}
+      <div className="composer-box-v2 font-sans">
+        <div className="composer-input-row font-sans">
+          <Sparkles size={16} className="composer-sparkle-icon" />
+          <textarea
+            className="composer-textarea-v2 font-sans"
+            placeholder="Ask AI an engineering question or verify API / statutory codes..."
+            value={promptInput}
+            onChange={(e) => setPromptInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleFormSubmit(e);
+              }
+            }}
+            rows={isCenteredState ? 3 : 2}
+          />
+        </div>
 
-        {/* Toolbar inside composer box */}
+        {/* Toolbar Controls */}
         <div className="composer-toolbar">
           <div className="composer-toolbar-left font-mono">
             {/* File Attachment Button */}
-            <button 
-              type="button" 
+            <button
+              type="button"
               className="composer-btn font-mono"
               onClick={() => fileInputRef.current?.click()}
               title="Add Files"
             >
               <Paperclip size={14} />
-              <span>Add Files</span>
+              <span>Attach</span>
             </button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              style={{ display: 'none' }} 
-              multiple 
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              multiple
               accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp"
               onChange={handleFileChange}
             />
 
             {/* Source Selection Button */}
-            <button 
-              type="button" 
+            <button
+              type="button"
               className="composer-btn font-mono"
               onClick={() => setIsSourceModalOpen(true)}
               title="Select Sources"
@@ -305,7 +297,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
           </div>
 
           <div className="composer-toolbar-right font-mono">
-            {/* Model Selection Dropdown - In Place of Auto(Recommended) */}
+            {/* Sovereign Model Selector */}
             <div className="model-picker-wrapper">
               <button
                 type="button"
@@ -354,12 +346,12 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
             </div>
 
             {/* Send Button */}
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               className="composer-send-btn font-mono"
               disabled={!promptInput.trim() && attachedFiles.length === 0}
             >
-              <Play size={13} fill="currentColor" />
+              <ArrowUp size={15} />
               <span>Send</span>
             </button>
           </div>
@@ -370,23 +362,28 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
 
   return (
     <div className="chat-workspace-container font-sans">
-      
-      {/* 1. EMPTY CHAT STATE (CENTERED COMPOSER) */}
+
+      {/* 1. EMPTY CHAT STATE */}
       {isChatEmpty ? (
         <div className="centered-chat-workspace font-sans">
           <div className="empty-welcome-header">
-            <div className="empty-sparkle-badge">
-              <Sparkles size={24} className="icon-blue" />
+            {/* Singularity Floating Hero Brand */}
+            <div className="floating-hero-logo-box">
+              <img
+                src="/assets/singularity_logo.png"
+                alt="Singularity AI"
+                className="floating-hero-logo-flat"
+              />
             </div>
-            <h1 className="empty-welcome-heading font-sans">What would you like to work on?</h1>
+            <h1 className="empty-welcome-heading font-sans">What would you like to inspect today?</h1>
           </div>
 
-          {/* Large Centered Composer Box with Subtle Neon Glow */}
+          {/* Centered Composer */}
           <div className="centered-composer-container">
             {renderComposerForm(true)}
           </div>
 
-          {/* Shortcut Chips Below Centered Composer */}
+          {/* Shortcut Chips */}
           <div className="centered-shortcuts-row font-mono">
             <div className="chips-scroll">
               {SUGGESTION_CHIPS.map((chip) => (
@@ -403,19 +400,18 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
           </div>
         </div>
       ) : (
-        /* 2. ACTIVE CHAT STATE (SCROLLABLE MESSAGES + BOTTOM COMPOSER) */
+        /* 2. ACTIVE CHAT STATE */
         <>
-          {/* Top Conversation Header */}
           <header className="chat-topbar font-sans">
             <div className="chat-topbar-left flex items-center justify-between w-full flex-wrap gap-2">
               <div className="flex items-center gap-3">
-                <h2 className="chat-topbar-title">{activeChat?.title || 'New Conversation'}</h2>
+                <h2 className="chat-topbar-title">{activeChat?.title || 'Inspection Session'}</h2>
               </div>
 
               <div className="chat-topbar-tags font-mono flex items-center gap-2 flex-wrap">
                 {knowledgeScope === 'selected' && (
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     className="source-scope-badge"
                     onClick={() => setIsSourceModalOpen(true)}
                   >
@@ -443,7 +439,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
           <div className="chat-messages-area font-sans">
             {activeChat.messages.map((msg, index) => (
               <div key={msg.id || index} className={`chat-message-row ${msg.sender === 'user' ? 'user-row' : 'ai-row'}`}>
-                
+
                 {/* USER MESSAGE BUBBLE */}
                 {msg.sender === 'user' && (
                   <div className="user-message-wrapper">
@@ -468,15 +464,14 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                 {/* AI MESSAGE RESPONSE CARD */}
                 {(msg.sender === 'ai' || msg.role === 'assistant') && (
                   <div className="ai-message-wrapper">
-                    {/* Weight Swapping & Reasoning Loading Animation */}
                     {(msg.taskRun?.executionStatus === 'Processing' || (!msg.taskRun?.answer && !msg.content && !msg.text)) ? (
-                      <div className="flex items-start gap-3 p-3.5 my-3 bg-slate-900/70 border border-cyan-500/30 rounded-xl text-slate-300 text-xs animate-pulse shadow-md w-full max-w-xl">
+                      <div className="flex items-start gap-3 p-3.5 my-3 bg-slate-900/70 border border-amber-500/30 rounded-xl text-slate-300 text-xs animate-pulse shadow-md w-full max-w-xl">
                         <div className="relative flex h-3 w-3 mt-0.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
                         </div>
                         <div className="flex flex-col gap-0.5">
-                          <span className="font-semibold text-cyan-300">
+                          <span className="font-semibold text-amber-300">
                             {selectedModel === 'auto'
                               ? 'Evaluating intent & routing to optimal sovereign model...'
                               : `Allocating weights for ${selectedModel}...`}
@@ -542,7 +537,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                           </div>
                         )}
 
-                        {/* 5. GENERATED FILES */}
+                        {/* 5. GENERATED ARTIFACTS / DOCX */}
                         {msg.taskRun?.generatedFiles && msg.taskRun.generatedFiles.length > 0 && (
                           <div className="ai-generated-files-section">
                             <h4 className="findings-heading font-sans">Files</h4>
@@ -552,9 +547,9 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                                   <div className="file-card-left">
                                     <div className={`file-icon-box ${file.name.endsWith('.xlsx') ? 'xlsx-bg' : 'pdf-bg'}`}>
                                       {file.name.endsWith('.xlsx') ? (
-                                        <FileSpreadsheet size={18} style={{ color: 'var(--accent-green)' }} />
+                                        <FileSpreadsheet size={18} style={{ color: 'var(--accent-emerald, #16856A)' }} />
                                       ) : (
-                                        <FileText size={18} style={{ color: 'var(--accent-red)' }} />
+                                        <FileText size={18} style={{ color: 'var(--accent-red, #DC2626)' }} />
                                       )}
                                     </div>
                                     <div className="file-info-block">
@@ -589,7 +584,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                         {(msg.resolved_model || msg.taskRun?.technicalDetails?.modelsUsed) && (
                           <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60">
-                              ⚡ Engine: <span className="text-cyan-400 font-semibold">{msg.resolved_model || msg.taskRun?.technicalDetails?.modelsUsed}</span>
+                              ⚡ Engine: <span className="text-amber-400 font-semibold">{msg.resolved_model || msg.taskRun?.technicalDetails?.modelsUsed}</span>
                             </span>
                             {((msg.sources && msg.sources.length > 0) || (msg.taskRun?.sources && msg.taskRun.sources.length > 0)) && (
                               <span className="text-slate-500">
@@ -609,7 +604,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Bottom Composer Area */}
+          {/* Bottom Composer */}
           <footer className="chat-composer-area font-sans">
             {renderComposerForm(false)}
           </footer>
@@ -633,10 +628,10 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
             <div className="modal-body-form font-sans">
               <div className="knowledge-scope-radios">
                 <label className={`radio-card ${knowledgeScope === 'selected' ? 'active' : ''}`}>
-                  <input 
-                    type="radio" 
-                    name="scope" 
-                    value="selected" 
+                  <input
+                    type="radio"
+                    name="scope"
+                    value="selected"
                     checked={knowledgeScope === 'selected'}
                     onChange={() => setKnowledgeScope('selected')}
                   />
@@ -646,10 +641,10 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                 </label>
 
                 <label className={`radio-card ${knowledgeScope === 'all' ? 'active' : ''}`}>
-                  <input 
-                    type="radio" 
-                    name="scope" 
-                    value="all" 
+                  <input
+                    type="radio"
+                    name="scope"
+                    value="all"
                     checked={knowledgeScope === 'all'}
                     onChange={() => setKnowledgeScope('all')}
                   />
@@ -659,10 +654,10 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                 </label>
 
                 <label className={`radio-card ${knowledgeScope === 'current' ? 'active' : ''}`}>
-                  <input 
-                    type="radio" 
-                    name="scope" 
-                    value="current" 
+                  <input
+                    type="radio"
+                    name="scope"
+                    value="current"
                     checked={knowledgeScope === 'current'}
                     onChange={() => setKnowledgeScope('current')}
                   />
@@ -692,8 +687,8 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                     {INITIAL_SOURCE_FILES.map((doc) => {
                       const isChecked = selectedSourceIds.includes(doc.id);
                       return (
-                        <div 
-                          key={doc.id} 
+                        <div
+                          key={doc.id}
                           className={`check-item ${isChecked ? 'selected' : ''}`}
                           onClick={() => toggleSelectSourceDoc(doc.id)}
                         >
@@ -714,13 +709,13 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
             </div>
 
             <div className="modal-footer font-mono">
-              <button 
+              <button
                 className="secondary-btn"
                 onClick={() => setIsSourceModalOpen(false)}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 className="primary-action-btn"
                 onClick={() => setIsSourceModalOpen(false)}
               >

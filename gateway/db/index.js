@@ -21,6 +21,8 @@ if (dbPath && dbPath !== ':memory:' && !dbPath.startsWith('idb://')) {
 
 let pgliteInstance = null;
 let isPostgresConnected = false;
+let isInitialized = false;
+let initPromise = null;
 
 // Preserved fallback in-memory store for backwards compatibility
 export const inMemoryStore = {
@@ -31,82 +33,14 @@ export const inMemoryStore = {
 };
 
 /**
- * Returns or initializes the active singleton PGlite database instance
+ * Provisions all essential tables, schemas, and indices in PGlite.
+ * Runs once and is guarded by an initialization promise.
  */
-export async function getDb() {
-  if (!pgliteInstance) {
-    try {
-      pgliteInstance = new PGlite(dbPath);
-      await pgliteInstance.waitReady;
-      isPostgresConnected = true;
-      console.log(`✅ [PGLITE] Embedded PostgreSQL instance active at: ${dbPath}`);
-    } catch (err) {
-      isPostgresConnected = false;
-      console.error('❌ [PGLITE] Failed to launch embedded database:', err);
-      throw err;
-    }
-  }
-  return pgliteInstance;
-}
+async function provisionTables(db) {
+  if (isInitialized) return;
 
-/**
- * Executes a parameterized SQL query on the PGlite engine.
- * Output signature matches pg-pool contract: { rows: [...], rowCount: n, fields: [...] }
- */
-export const query = async (text, params = []) => {
   try {
-    const db = await getDb();
-    const result = await db.query(text, params);
-    return {
-      rows: result.rows || [],
-      rowCount: result.rows ? result.rows.length : 0,
-      fields: result.fields || []
-    };
-  } catch (err) {
-    console.error('[PGLITE QUERY ERROR]:', err.message, '\nQuery:', text);
-    throw err;
-  }
-};
-
-/**
- * Pool simulation interface maintaining drop-in compatibility with legacy code
- */
-export const pool = {
-  query: (text, params) => query(text, params),
-  connect: async () => {
-    const db = await getDb();
-    return {
-      query: (text, params) => query(text, params),
-      release: () => { }
-    };
-  }
-};
-
-/**
- * Verify PGlite connection and query execution
- */
-export const testConnection = async () => {
-  try {
-    const res = await query('SELECT version() as ver, NOW() as current_time');
-    const versionStr = res.rows[0]?.ver || 'PGlite Embedded PostgreSQL WASM';
-    isPostgresConnected = true;
-    console.log('✅ [PGLITE] Embedded PostgreSQL Connected successfully:', versionStr.split(',')[0]);
-    return true;
-  } catch (error) {
-    isPostgresConnected = false;
-    console.warn('⚠️ [PGLITE] Database unavailable:', error.message);
-    return false;
-  }
-};
-
-/**
- * Initialize all database tables, extensions, and default schemas
- */
-export const initDatabase = async () => {
-  try {
-    const db = await getDb();
-
-    // 1. Execute external backend/schema.sql or gateway/schema.sql if provided
+    // 1. Try loading external backend/schema.sql or gateway/schema.sql if present
     const candidatePaths = [
       path.join(__dirname, '..', 'schema.sql'),
       path.join(__dirname, '..', '..', 'backend', 'schema.sql')
@@ -120,14 +54,14 @@ export const initDatabase = async () => {
             await db.exec(schemaSql);
             console.log(`✅ [PGLITE] Loaded external schema from: ${path.basename(schemaPath)}`);
           } catch (execErr) {
-            console.warn(`⚠️ [PGLITE] Warning while running ${path.basename(schemaPath)}:`, execErr.message);
+            console.warn(`⚠️ [PGLITE] Warning running ${path.basename(schemaPath)}:`, execErr.message);
           }
         }
         break;
       }
     }
 
-    // 2. Provision essential enterprise tables (no restrictive check constraints on roles)
+    // 2. Ensure core enterprise tables exist
     await db.exec(`
       -- Users Table (Engineers and Personnel)
       CREATE TABLE IF NOT EXISTS users (
@@ -193,12 +127,121 @@ export const initDatabase = async () => {
       );
     `);
 
+    // 3. Seed default inspector profile if users table is empty
+    const checkCount = await db.query('SELECT COUNT(*) as count FROM users');
+    const totalUsers = parseInt(checkCount.rows[0]?.count || '0', 10);
+
+    if (totalUsers === 0) {
+      // Default hash for 'SovereignPass2026!'
+      const seedHash = '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
+      await db.query(`
+        INSERT INTO users (username, email, password_hash, full_name, role, department)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (email) DO NOTHING;
+      `, [
+        'lead_inspector',
+        'engineer@mrpl.co.in',
+        seedHash,
+        'Lead Integrity Inspector',
+        'lead_inspector',
+        'Asset Integrity & Inspection'
+      ]);
+      console.log('✅ [PGLITE] Seeded default inspector account: engineer@mrpl.co.in');
+    }
+
+    isInitialized = true;
     console.log('✅ [PGLITE] Sovereign enterprise tables, users, auth, and audit vault verified.');
-    return true;
   } catch (err) {
     console.error('❌ [PGLITE] Schema provisioning failure:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Returns or initializes the active singleton PGlite database instance.
+ * Guarantees that tables are created before returning the instance.
+ */
+export async function getDb() {
+  if (!pgliteInstance) {
+    try {
+      pgliteInstance = new PGlite(dbPath);
+      await pgliteInstance.waitReady;
+      isPostgresConnected = true;
+      console.log(`✅ [PGLITE] Embedded PostgreSQL instance active at: ${dbPath}`);
+    } catch (err) {
+      isPostgresConnected = false;
+      console.error('❌ [PGLITE] Failed to launch embedded database:', err);
+      throw err;
+    }
+  }
+
+  // Ensure table provisioning is executed and awaited
+  if (!isInitialized) {
+    if (!initPromise) {
+      initPromise = provisionTables(pgliteInstance);
+    }
+    await initPromise;
+  }
+
+  return pgliteInstance;
+}
+
+/**
+ * Executes a parameterized SQL query on the PGlite engine.
+ * Output signature matches pg-pool contract: { rows: [...], rowCount: n, fields: [...] }
+ */
+export const query = async (text, params = []) => {
+  try {
+    const db = await getDb();
+    const result = await db.query(text, params);
+    return {
+      rows: result.rows || [],
+      rowCount: result.rows ? result.rows.length : 0,
+      fields: result.fields || []
+    };
+  } catch (err) {
+    console.error('[PGLITE QUERY ERROR]:', err.message, '\nQuery:', text);
+    throw err;
+  }
+};
+
+/**
+ * Pool simulation interface maintaining drop-in compatibility with legacy code
+ */
+export const pool = {
+  query: (text, params) => query(text, params),
+  connect: async () => {
+    const db = await getDb();
+    return {
+      query: (text, params) => query(text, params),
+      release: () => { }
+    };
+  }
+};
+
+/**
+ * Verify PGlite connection and query execution
+ */
+export const testConnection = async () => {
+  try {
+    const res = await query('SELECT version() as ver, NOW() as current_time');
+    const versionStr = res.rows[0]?.ver || 'PGlite Embedded PostgreSQL WASM';
+    isPostgresConnected = true;
+    console.log('✅ [PGLITE] Embedded PostgreSQL Connected successfully:', versionStr.split(',')[0]);
+    return true;
+  } catch (error) {
+    isPostgresConnected = false;
+    console.warn('⚠️ [PGLITE] Database unavailable:', error.message);
     return false;
   }
+};
+
+/**
+ * Explicit schema initialization export
+ */
+export const initDatabase = async () => {
+  const db = await getDb();
+  return isInitialized;
 };
 
 export const getIsPostgresConnected = () => isPostgresConnected;
