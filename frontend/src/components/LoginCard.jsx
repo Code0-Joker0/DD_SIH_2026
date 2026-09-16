@@ -52,7 +52,7 @@ export default function LoginCard({ onLoginSuccess }) {
         </div>
 
         <h2 className="card-title">Welcome Back</h2>
-        <p className="card-subtitle">Sign in to your sovereign workbench</p>
+        <p className="card-subtitle">Sign in to your Singularity workbench</p>
 
         {errorMessage && (
           <div style={{

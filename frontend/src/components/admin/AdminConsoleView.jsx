@@ -34,7 +34,7 @@ export default function AdminConsoleView({ onExitAdmin, onSignOut }) {
             <Shield size={18} strokeWidth={2.2} />
           </div>
           <div className="dash-brand-text">
-            <span className="brand-primary font-bold">SOVEREIGN AI WORKBENCH</span>
+            <span className="brand-primary font-bold">SINGULARITY</span>
             <span className="admin-console-badge font-mono">ADMIN CONSOLE</span>
           </div>
         </div>

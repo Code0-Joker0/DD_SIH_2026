@@ -88,7 +88,7 @@ export default function DashboardView({ user, onSignOut }: DashboardViewProps) {
   const [renameTitleInput, setRenameTitleInput] = useState<string>('');
   const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
   
-  // Sovereign Air-Gap Network Telemetry state
+  // Singularity Air-Gap Network Telemetry state
   const [networkStatus, setNetworkStatus] = useState({
     egress_packets: 0,
     wan_status: 'SECURE_AIR_GAPPED',
@@ -105,7 +105,7 @@ export default function DashboardView({ user, onSignOut }: DashboardViewProps) {
           setNetworkStatus(data);
         }
       } catch {
-        // Sovereign local fallback
+        // Singularity local fallback
       }
     };
 
@@ -322,14 +322,14 @@ export default function DashboardView({ user, onSignOut }: DashboardViewProps) {
                       {
                         num: '01',
                         title: 'Telemetry & Verification Status',
-                        desc: 'Query verified against local sovereign knowledge base.'
+                        desc: 'Query verified against local Singularity knowledge base.'
                       }
                     ],
                     recommendation: data.recommendation || 'Save output note or export findings to task records.',
                     sources: sourceList,
                     generatedFiles: generatedFilesList,
                     technicalDetails: {
-                      modelsUsed: data.model || 'Sovereign Local Inference',
+                      modelsUsed: data.model || 'Singularity Local Inference',
                       ocrUsed: attachedFiles.length > 0 ? 'Document Parser Active' : 'None',
                       retrievalScope: `${sourceList.length} verified context source(s)`,
                       selectedSources: `${sourceList.length} sources`,
@@ -466,18 +466,17 @@ export default function DashboardView({ user, onSignOut }: DashboardViewProps) {
             <Shield size={18} strokeWidth={2.2} />
           </div>
           <div className="dash-brand-text">
-            <span className="brand-primary font-bold">SOVEREIGN AI</span>
-            <span className="brand-secondary font-sans">WorkBench</span>
+            <span className="brand-primary font-bold">SINGULARITY</span>
           </div>
         </div>
 
-        {/* Dynamic Sovereign Air-Gap Telemetry Badge */}
+        {/* Dynamic Singularity Air-Gap Telemetry Badge */}
         <div 
           className="local-processing-pill font-mono"
           title={`Air-Gap Status: ${networkStatus.wan_status || 'SECURE_AIR_GAPPED'} | Egress: ${networkStatus.egress_packets ?? 0} WAN pkts | Interface: ${networkStatus.active_ip || '127.0.0.1'}`}
         >
           <span className="green-dot"></span>
-          <span>{networkStatus.egress_packets === 0 ? '0 WAN Packets · Air-Gapped' : 'Sovereign Network'}</span>
+          <span>{networkStatus.egress_packets === 0 ? '0 WAN Packets · Air-Gapped' : 'Singularity Network'}</span>
         </div>
 
         <div className="dash-top-right-new">

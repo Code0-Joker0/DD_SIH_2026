@@ -4,7 +4,7 @@ import { ThemeContext } from './ThemeContextDef';
 export function ThemeProvider({ children }) {
   const [themeMode, setThemeModeState] = useState(() => {
     try {
-      const saved = localStorage.getItem('sovereign_theme');
+      const saved = localStorage.getItem('singularity_theme');
       if (saved === 'light' || saved === 'dark' || saved === 'system') {
         return saved;
       }
@@ -52,7 +52,7 @@ export function ThemeProvider({ children }) {
   const setThemeMode = (mode) => {
     setThemeModeState(mode);
     try {
-      localStorage.setItem('sovereign_theme', mode);
+      localStorage.setItem('singularity_theme', mode);
     } catch {
       // Ignore storage errors
     }

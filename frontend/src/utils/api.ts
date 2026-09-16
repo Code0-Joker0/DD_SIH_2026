@@ -409,7 +409,7 @@ export async function executeAgentTask(taskPrompt?: string, file: File | null = 
 }
 
 /**
- * 13. Fetch Sovereign Air-Gap Network Status
+ * 13. Fetch Singularity Air-Gap Network Status
  * Polls Node Gateway (/api/network-status) with direct fallback to FastAPI (port 8000)
  */
 export async function getNetworkStatus(): Promise<NetworkStatus> {
@@ -435,7 +435,7 @@ export async function getNetworkStatus(): Promise<NetworkStatus> {
     egress_packets: 0,
     wan_status: 'SECURE_AIR_GAPPED',
     active_ip: '127.0.0.1',
-    interface: 'Loopback (Sovereign Isolated)',
+    interface: 'Loopback (Singularity Isolated)',
   };
 }
 
