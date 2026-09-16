@@ -7,10 +7,10 @@ import { encryptBuffer } from '../utils/fileCrypto.js';
 dotenv.config();
 
 /**
- * Singularity AI - Database Initialization & Seed Script
+ * Singularity - Database Initialization & Seed Script
  */
 async function main() {
-  console.log('🚀 Initializing Singularity AI Enterprise Database...');
+  console.log('🚀 Initializing Singularity Enterprise Database...');
 
   // 1. Test database connection
   await db.testConnection();
@@ -78,28 +78,28 @@ async function main() {
       mime_type: 'application/pdf',
       category: 'PDF',
       department: 'Industrial Systems',
-      content: '%PDF-1.4 Singularity AI Site A Turbine & Structure Inspection Report. Status: Verified.'
+      content: '%PDF-1.4 Singularity Site A Turbine & Structure Inspection Report. Status: Verified.'
     },
     {
       original_name: 'Vendor_Compliance_Analysis.docx',
       mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       category: 'DOCX',
       department: 'Quality Assurance',
-      content: 'PK\x03\x04 Singularity AI Enterprise Vendor Compliance Analysis 2026.'
+      content: 'PK\x03\x04 Singularity Enterprise Vendor Compliance Analysis 2026.'
     },
     {
       original_name: 'Plant_Audit_Stress_Data.xlsx',
       mime_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       category: 'Spreadsheet',
       department: 'Industrial Systems',
-      content: 'PK\x03\x04 Singularity AI Plant Audit Stress Matrix\nTimestamp,Sensor_ID,PSI_Pressure,Vibration_Hz,Status\n2026-09-01T08:00:00Z,SN-901,142.5,60.1,Normal'
+      content: 'PK\x03\x04 Singularity Plant Audit Stress Matrix\nTimestamp,Sensor_ID,PSI_Pressure,Vibration_Hz,Status\n2026-09-01T08:00:00Z,SN-901,142.5,60.1,Normal'
     },
     {
       original_name: 'Safety_Protocol_Notes.pdf',
       mime_type: 'application/pdf',
       category: 'PDF',
       department: 'Safety & Security',
-      content: '%PDF-1.4 Singularity AI Zero-Trust Operational Safety Protocols. Air-gapped compute strictly enforced.'
+      content: '%PDF-1.4 Singularity Zero-Trust Operational Safety Protocols. Air-gapped compute strictly enforced.'
     },
     {
       original_name: 'Telemetry_Log_Extract.csv',
@@ -150,7 +150,7 @@ async function main() {
     }
   }
 
-  console.log('✨ Singularity AI Database initialization complete!');
+  console.log('✨ Singularity Database initialization complete!');
   process.exit(0);
 }
 

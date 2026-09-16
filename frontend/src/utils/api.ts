@@ -1,5 +1,5 @@
 /**
- * Singularity AI Enterprise API Client (TypeScript)
+ * Singularity Enterprise API Client (TypeScript)
  * Sovereign On-Premise Industrial AI Workbench (MRPL SIH26117)
  * Manages JWT session tokens, headers, encrypted storage, and Ollama/FastAPI agent workflows
  */

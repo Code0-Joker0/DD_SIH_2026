@@ -1,5 +1,5 @@
 -- ============================================================================
--- Singularity AI Enterprise - PostgreSQL Database Schema
+-- Singularity Enterprise - PostgreSQL Database Schema
 -- Problem Statement: Secure On-Premise Enterprise File Storage & Workbench
 -- Encryption: AES-256-GCM with per-file unique IV, Auth Tag, and SHA-256 Checksum
 -- ============================================================================

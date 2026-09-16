@@ -1,5 +1,5 @@
 /**
- * Singularity AI Client-Side Encryption Utilities
+ * Singularity Client-Side Encryption Utilities
  * Uses Web Crypto API / CryptoJS for end-to-end transport encryption
  */
 

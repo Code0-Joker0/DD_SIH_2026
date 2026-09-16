@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 
 /**
- * Singularity AI Cryptographic Utility
+ * Singularity Cryptographic Utility
  * Authenticated Encryption at Rest using AES-256-GCM
  * Guaranteed Confidentiality, Authenticity, and Integrity
  */
