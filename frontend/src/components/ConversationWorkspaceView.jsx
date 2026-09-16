@@ -19,7 +19,7 @@ import {
   Info
 } from 'lucide-react';
 import { INITIAL_SOURCE_FILES } from '../data/chatStore';
-import { executeAgentTask } from '../utils/api';
+import { executeAgentTask, fetchModels } from '../utils/api';
 
 const SUGGESTION_CHIPS = [
   'Analyze',
@@ -31,12 +31,21 @@ const SUGGESTION_CHIPS = [
   'Generate'
 ];
 
-const AI_MODES = [
-  { id: 'auto', label: 'Auto (Recommended)', desc: 'Automatically determines capabilities' },
-  { id: 'general', label: 'General Analysis', desc: 'Documents, research, summaries, reasoning' },
-  { id: 'code', label: 'Code Assistance', desc: 'Code generation, debugging, scripts' },
-  { id: 'vision', label: 'Vision & P&ID Analysis', desc: 'Schematics, P&IDs, blueprints, images' }
+const DEFAULT_MODELS = [
+  { id: 'auto', label: 'Auto (Recommended)', tag: 'Adaptive', icon: '✨', desc: 'Auto-evaluates query intent and routes to optimal sovereign model' },
+  { id: 'llama3.2:3b', label: 'Llama 3.2 (3B)', tag: 'Fast', icon: '⚡', desc: 'Ultra-fast low-latency sovereign engine for quick conversational QA' },
+  { id: 'qwen2.5:7b', label: 'Qwen 2.5 (7B)', tag: 'Technical QA', icon: '🔍', desc: 'Deep statutory synthesis (API 570/510, ASME, OISD-118)' },
+  { id: 'llama3.1:8b', label: 'Llama 3.1 (8B)', tag: 'Agent & Tools', icon: '🛠️', desc: 'Multi-turn agent reasoning, tool execution, and document synthesis' },
+  { id: 'deepseek-r1:7b', label: 'DeepSeek-R1 (7B)', tag: 'Calculations', icon: '🧠', desc: 'Reasoning engine for corrosion rates, wall loss % & remaining life math' }
 ];
+
+const MODEL_LABEL_MAP = {
+  'auto': { label: 'Auto (Recommended)', tag: 'Adaptive', icon: '✨', desc: 'Auto-evaluates query intent and routes to optimal sovereign model' },
+  'llama3.2:3b': { label: 'Llama 3.2 (3B)', tag: 'Fast', icon: '⚡', desc: 'Ultra-fast low-latency sovereign engine for quick conversational QA' },
+  'qwen2.5:7b': { label: 'Qwen 2.5 (7B)', tag: 'Technical QA', icon: '🔍', desc: 'Deep statutory synthesis (API 570/510, ASME, OISD-118)' },
+  'llama3.1:8b': { label: 'Llama 3.1 (8B)', tag: 'Agent & Tools', icon: '🛠️', desc: 'Multi-turn agent reasoning, tool execution, and document synthesis' },
+  'deepseek-r1:7b': { label: 'DeepSeek-R1 (7B)', tag: 'Calculations', icon: '🧠', desc: 'Reasoning engine for corrosion rates, wall loss % & remaining life math' }
+};
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.webp'];
 
@@ -48,23 +57,55 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
   // Knowledge scope & source selection state
   const [knowledgeScope, setKnowledgeScope] = useState('selected');
   const [selectedSourceIds, setSelectedSourceIds] = useState(['doc_001', 'doc_002', 'doc_005']);
-  const [selectedAiMode, setSelectedAiMode] = useState('auto');
-  
-  // Dynamic UI dropdowns & modals
-  const [isAiModeOpen, setIsAiModeOpen] = useState(false);
+
+  // Sovereign AI Model switcher state
+  const [availableModels, setAvailableModels] = useState(DEFAULT_MODELS);
+  const [selectedModel, setSelectedModel] = useState('auto');
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [openExecutionDetailsMap, setOpenExecutionDetailsMap] = useState({});
 
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  // Close AI Mode picker when clicking anywhere outside
+  // Fetch available models on component mount
   useEffect(() => {
-    if (!isAiModeOpen) return;
+    let isMounted = true;
+    async function loadModels() {
+      try {
+        const data = await fetchModels();
+        if (isMounted && data && Array.isArray(data.models) && data.models.length > 0) {
+          const mapped = data.models.map((m) => {
+            const modelId = typeof m === 'string' ? m : m.id || m.name;
+            const meta = MODEL_LABEL_MAP[modelId];
+            return {
+              id: modelId,
+              label: meta?.label || (typeof m === 'object' && m.label ? m.label : modelId),
+              tag: meta?.tag || 'Local',
+              icon: meta?.icon || '🤖',
+              desc: meta?.desc || `Sovereign ${modelId} inference model`
+            };
+          });
+          setAvailableModels(mapped);
+          if (data.default && mapped.some(m => m.id === data.default)) {
+            setSelectedModel(data.default);
+          }
+        }
+      } catch (err) {
+        console.warn('[Failed to fetch available models, fallback to default list]:', err);
+      }
+    }
+    loadModels();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Close Model picker when clicking anywhere outside
+  useEffect(() => {
+    if (!isModelPickerOpen) return;
 
     const handleClickOutside = (event) => {
-      if (!event.target.closest('.ai-mode-picker-wrapper')) {
-        setIsAiModeOpen(false);
+      if (!event.target.closest('.model-picker-wrapper')) {
+        setIsModelPickerOpen(false);
       }
     };
 
@@ -72,7 +113,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isAiModeOpen]);
+  }, [isModelPickerOpen]);
 
   // Sync state when activeChat changes
   useEffect(() => {
@@ -150,6 +191,8 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     }));
   };
 
+  const currentModelObj = availableModels.find(m => m.id === selectedModel) || availableModels[0] || DEFAULT_MODELS[0];
+
   const handleFormSubmit = (e) => {
     e.preventDefault();
     if (!promptInput.trim() && attachedFiles.length === 0) return;
@@ -170,12 +213,12 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
         knowledgeScope,
         selectedSourceIds: knowledgeScope === 'selected' ? selectedSourceIds : [],
         sourcesCount,
-        aiMode: AI_MODES.find(m => m.id === selectedAiMode)?.label || 'Auto (Recommended)'
+        aiMode: currentModelObj?.label || 'Auto (Recommended)',
+        selectedModel
       });
     }
   };
 
-  const currentModeObj = AI_MODES.find(m => m.id === selectedAiMode);
   const isChatEmpty = !activeChat || !activeChat.messages || activeChat.messages.length === 0;
 
   // Reusable Composer Component
@@ -262,31 +305,50 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
           </div>
 
           <div className="composer-toolbar-right font-mono">
-            {/* AI Mode Selector Dropdown */}
-            <div className="ai-mode-picker-wrapper">
+            {/* Model Selection Dropdown - In Place of Auto(Recommended) */}
+            <div className="model-picker-wrapper">
               <button
                 type="button"
-                className="ai-mode-picker-trigger font-mono"
-                onClick={() => setIsAiModeOpen(!isAiModeOpen)}
+                className="model-picker-trigger font-mono"
+                onClick={() => setIsModelPickerOpen(!isModelPickerOpen)}
+                title="Select Local AI Inference Engine"
               >
-                <span>{currentModeObj?.label}</span>
-                <ChevronDown size={13} />
+                <span className="model-trigger-icon">{currentModelObj?.icon || '⚡'}</span>
+                <span className="model-trigger-label font-sans">{currentModelObj?.label || 'Auto (Recommended)'}</span>
+                <ChevronDown size={13} className={`model-chevron-icon ${isModelPickerOpen ? 'open' : ''}`} />
               </button>
 
-              {isAiModeOpen && (
-                <div className="ai-mode-picker-menu">
-                  {AI_MODES.map((mode) => (
-                    <div
-                      key={mode.id}
-                      className={`mode-picker-item ${selectedAiMode === mode.id ? 'active' : ''}`}
-                      onClick={() => {
-                        setSelectedAiMode(mode.id);
-                        setIsAiModeOpen(false);
-                      }}
-                    >
-                      <span className="mode-item-title font-sans">{mode.label}</span>
-                    </div>
-                  ))}
+              {isModelPickerOpen && (
+                <div className="model-picker-menu animate-fade-in font-sans">
+                  <div className="model-picker-header font-mono">
+                    <span>Sovereign Local Engine</span>
+                  </div>
+                  {availableModels.map((model) => {
+                    const isSelected = selectedModel === model.id;
+                    return (
+                      <div
+                        key={model.id}
+                        className={`model-picker-item ${isSelected ? 'active' : ''}`}
+                        onClick={() => {
+                          setSelectedModel(model.id);
+                          setIsModelPickerOpen(false);
+                        }}
+                      >
+                        <div className="model-item-top">
+                          <div className="model-item-title-row">
+                            <span className="model-icon">{model.icon || '🤖'}</span>
+                            <span className="model-name">{model.label}</span>
+                          </div>
+                          {model.tag && (
+                            <span className="model-tag-badge font-mono">{model.tag}</span>
+                          )}
+                        </div>
+                        {model.desc && (
+                          <p className="model-item-desc">{model.desc}</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -345,9 +407,12 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
         <>
           {/* Top Conversation Header */}
           <header className="chat-topbar font-sans">
-            <div className="chat-topbar-left">
-              <h2 className="chat-topbar-title">{activeChat?.title || 'New Conversation'}</h2>
-              <div className="chat-topbar-tags font-mono">
+            <div className="chat-topbar-left flex items-center justify-between w-full flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <h2 className="chat-topbar-title">{activeChat?.title || 'New Conversation'}</h2>
+              </div>
+
+              <div className="chat-topbar-tags font-mono flex items-center gap-2 flex-wrap">
                 {knowledgeScope === 'selected' && (
                   <button 
                     type="button" 
@@ -401,102 +466,141 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                 )}
 
                 {/* AI MESSAGE RESPONSE CARD */}
-                {msg.sender === 'ai' && (
+                {(msg.sender === 'ai' || msg.role === 'assistant') && (
                   <div className="ai-message-wrapper">
-                    <div className="ai-message-card">
-
-                      {/* 1. MAIN ANSWER BODY */}
-                      {msg.taskRun?.answer && (
-                        <div className="ai-answer-section">
-                          <p className="ai-answer-text">{msg.taskRun.answer}</p>
+                    {/* Weight Swapping & Reasoning Loading Animation */}
+                    {(msg.taskRun?.executionStatus === 'Processing' || (!msg.taskRun?.answer && !msg.content && !msg.text)) ? (
+                      <div className="flex items-start gap-3 p-3.5 my-3 bg-slate-900/70 border border-cyan-500/30 rounded-xl text-slate-300 text-xs animate-pulse shadow-md w-full max-w-xl">
+                        <div className="relative flex h-3 w-3 mt-0.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
                         </div>
-                      )}
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-semibold text-cyan-300">
+                            {selectedModel === 'auto'
+                              ? 'Evaluating intent & routing to optimal sovereign model...'
+                              : `Allocating weights for ${selectedModel}...`}
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            Swapping model weights in RTX 3050 VRAM & synthesizing Qdrant knowledge context
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="ai-message-card">
 
-                      {/* 2. KEY FINDINGS */}
-                      {msg.taskRun?.findings && msg.taskRun.findings.length > 0 && (
-                        <div className="ai-findings-section">
-                          <h4 className="findings-heading font-sans">Key Findings</h4>
-                          <div className="findings-list">
-                            {msg.taskRun.findings.map((finding, fIdx) => (
-                              <div key={fIdx} className="finding-item">
-                                <span className="finding-num font-mono">{finding.num}</span>
-                                <div className="finding-content">
-                                  <span className="finding-title">{finding.title}</span>
-                                  <p className="finding-desc">{finding.desc}</p>
-                                </div>
-                              </div>
-                            ))}
+                        {/* 1. MAIN ANSWER BODY */}
+                        {msg.taskRun?.answer && (
+                          <div className="ai-answer-section">
+                            <p className="ai-answer-text">{msg.taskRun.answer}</p>
                           </div>
-                        </div>
-                      )}
-
-                      {/* 3. RECOMMENDATION */}
-                      {msg.taskRun?.recommendation && (
-                        <div className="ai-recommendation-box font-sans">
-                          <span className="rec-label font-mono">Recommendation:</span>
-                          <p className="rec-text">{msg.taskRun.recommendation}</p>
-                        </div>
-                      )}
-
-                      {/* 4. SOURCES CITED */}
-                      {msg.taskRun?.sources && msg.taskRun.sources.length > 0 && (
-                        <div className="ai-sources-section">
-                          <span className="sources-heading font-mono">Sources:</span>
-                          <div className="sources-chips-row font-mono">
-                            {msg.taskRun.sources.map((srcName, srcIdx) => (
-                              <div key={srcIdx} className="source-chip">
-                                <FileText size={12} />
-                                <span>{srcName}</span>
-                              </div>
-                            ))}
+                        )}
+                        {(!msg.taskRun?.answer && (msg.content || msg.text)) && (
+                          <div className="ai-answer-section">
+                            <p className="ai-answer-text">{msg.content || msg.text}</p>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* 5. GENERATED FILES */}
-                      {msg.taskRun?.generatedFiles && msg.taskRun.generatedFiles.length > 0 && (
-                        <div className="ai-generated-files-section">
-                          <h4 className="findings-heading font-sans">Files</h4>
-                          <div className="files-grid">
-                            {msg.taskRun.generatedFiles.map((file, gIdx) => (
-                              <div key={gIdx} className="generated-file-card">
-                                <div className="file-card-left">
-                                  <div className={`file-icon-box ${file.name.endsWith('.xlsx') ? 'xlsx-bg' : 'pdf-bg'}`}>
-                                    {file.name.endsWith('.xlsx') ? (
-                                      <FileSpreadsheet size={18} style={{ color: 'var(--accent-green)' }} />
-                                    ) : (
-                                      <FileText size={18} style={{ color: 'var(--accent-red)' }} />
-                                    )}
-                                  </div>
-                                  <div className="file-info-block">
-                                    <span className="file-name font-sans">{file.name}</span>
+                        {/* 2. KEY FINDINGS */}
+                        {msg.taskRun?.findings && msg.taskRun.findings.length > 0 && (
+                          <div className="ai-findings-section">
+                            <h4 className="findings-heading font-sans">Key Findings</h4>
+                            <div className="findings-list">
+                              {msg.taskRun.findings.map((finding, fIdx) => (
+                                <div key={fIdx} className="finding-item">
+                                  <span className="finding-num font-mono">{finding.num}</span>
+                                  <div className="finding-content">
+                                    <span className="finding-title">{finding.title}</span>
+                                    <p className="finding-desc">{finding.desc}</p>
                                   </div>
                                 </div>
-
-                                <div className="file-card-actions font-mono">
-                                  <button
-                                    type="button"
-                                    className="icon-action-btn primary"
-                                    title="Download Deliverable Note"
-                                    onClick={async () => {
-                                      try {
-                                        await executeAgentTask(activeChat?.title || 'Perform integrity assessment');
-                                      } catch (err) {
-                                        alert('Download failed: ' + err.message);
-                                      }
-                                    }}
-                                  >
-                                    <Download size={13} />
-                                    <span>Download</span>
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                    </div>
+                        {/* 3. RECOMMENDATION */}
+                        {msg.taskRun?.recommendation && (
+                          <div className="ai-recommendation-box font-sans">
+                            <span className="rec-label font-mono">Recommendation:</span>
+                            <p className="rec-text">{msg.taskRun.recommendation}</p>
+                          </div>
+                        )}
+
+                        {/* 4. SOURCES CITED */}
+                        {msg.taskRun?.sources && msg.taskRun.sources.length > 0 && (
+                          <div className="ai-sources-section">
+                            <span className="sources-heading font-mono">Sources:</span>
+                            <div className="sources-chips-row font-mono">
+                              {msg.taskRun.sources.map((srcName, srcIdx) => (
+                                <div key={srcIdx} className="source-chip">
+                                  <FileText size={12} />
+                                  <span>{srcName}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 5. GENERATED FILES */}
+                        {msg.taskRun?.generatedFiles && msg.taskRun.generatedFiles.length > 0 && (
+                          <div className="ai-generated-files-section">
+                            <h4 className="findings-heading font-sans">Files</h4>
+                            <div className="files-grid">
+                              {msg.taskRun.generatedFiles.map((file, gIdx) => (
+                                <div key={gIdx} className="generated-file-card">
+                                  <div className="file-card-left">
+                                    <div className={`file-icon-box ${file.name.endsWith('.xlsx') ? 'xlsx-bg' : 'pdf-bg'}`}>
+                                      {file.name.endsWith('.xlsx') ? (
+                                        <FileSpreadsheet size={18} style={{ color: 'var(--accent-green)' }} />
+                                      ) : (
+                                        <FileText size={18} style={{ color: 'var(--accent-red)' }} />
+                                      )}
+                                    </div>
+                                    <div className="file-info-block">
+                                      <span className="file-name font-sans">{file.name}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="file-card-actions font-mono">
+                                    <button
+                                      type="button"
+                                      className="icon-action-btn primary"
+                                      title="Download Deliverable Note"
+                                      onClick={async () => {
+                                        try {
+                                          await executeAgentTask(activeChat?.title || 'Perform integrity assessment');
+                                        } catch (err) {
+                                          alert('Download failed: ' + err.message);
+                                        }
+                                      }}
+                                    >
+                                      <Download size={13} />
+                                      <span>Download</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 6. ENGINE ATTRIBUTION BADGE */}
+                        {(msg.resolved_model || msg.taskRun?.technicalDetails?.modelsUsed) && (
+                          <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60">
+                              ⚡ Engine: <span className="text-cyan-400 font-semibold">{msg.resolved_model || msg.taskRun?.technicalDetails?.modelsUsed}</span>
+                            </span>
+                            {((msg.sources && msg.sources.length > 0) || (msg.taskRun?.sources && msg.taskRun.sources.length > 0)) && (
+                              <span className="text-slate-500">
+                                📚 {(msg.sources || msg.taskRun?.sources || []).length} Verified Sources
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                      </div>
+                    )}
                   </div>
                 )}
 

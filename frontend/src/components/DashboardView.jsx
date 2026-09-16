@@ -92,7 +92,7 @@ export default function DashboardView({ user, onSignOut }) {
   };
 
   // Live Agent Handler: Send Message to Node Gateway & FastAPI/Ollama
-  const handleSendMessage = async ({ prompt, attachedFiles = [], sourcesCount = 0 }) => {
+  const handleSendMessage = async ({ prompt, attachedFiles = [], sourcesCount = 0, selectedModel = 'auto' }) => {
     if (!activeChatId || !prompt?.trim()) return;
 
     const targetChatId = activeChatId;
@@ -103,6 +103,7 @@ export default function DashboardView({ user, onSignOut }) {
     const userMessage = {
       id: userMsgId,
       sender: 'user',
+      role: 'user',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       content: prompt,
       attachedFiles,
@@ -120,6 +121,8 @@ export default function DashboardView({ user, onSignOut }) {
     const pendingAiMessage = {
       id: aiMsgId,
       sender: 'ai',
+      role: 'assistant',
+      resolved_model: selectedModel,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       taskRun: {
         id: `tr_${Date.now()}`,
@@ -136,7 +139,7 @@ export default function DashboardView({ user, onSignOut }) {
         sources: [],
         generatedFiles: [],
         technicalDetails: {
-          modelsUsed: 'Autonomous Industrial Pipeline (Gateway Proxy)',
+          modelsUsed: selectedModel,
           ocrUsed: attachedFiles.length > 0 ? 'Document Parser Active' : 'None',
           retrievalScope: `Selected source scope: ${sourcesCount}`,
           executionTime: 'Running...',
@@ -177,10 +180,11 @@ export default function DashboardView({ user, onSignOut }) {
 
       // 3. Dispatch prompt to Node Gateway (/api/chat) with direct fallback
       const docIds = currentChat?.selectedSourceDocumentIds || [];
-      const data = await sendChatMessage(prompt, targetChatId, docIds);
+      const data = await sendChatMessage(prompt, targetChatId, docIds, selectedModel);
 
       const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(2);
       const answerText = data.response || data.message || data.text || (typeof data === 'string' ? data : JSON.stringify(data));
+      const resolvedModel = data.resolved_model || data.model || selectedModel;
       const sourceList = Array.isArray(data.sources) && data.sources.length > 0
         ? data.sources.map(s => typeof s === 'string' ? s : s.filename || s.title || 'Referenced Document')
         : INITIAL_SOURCE_FILES.slice(0, Math.min(sourcesCount || 2, 3)).map(d => d.name);
@@ -194,6 +198,9 @@ export default function DashboardView({ user, onSignOut }) {
               if (m.id === aiMsgId) {
                 return {
                   ...m,
+                  role: 'assistant',
+                  resolved_model: resolvedModel,
+                  sources: sourceList,
                   taskRun: {
                     id: `tr_${Date.now()}`,
                     executionStatus: 'Completed',
@@ -201,21 +208,21 @@ export default function DashboardView({ user, onSignOut }) {
                       { key: 'understanding', label: 'Understanding request', status: 'done' },
                       { key: 'reading', label: attachedFiles.length > 0 ? `Read ${attachedFiles.length} attached file(s)` : 'Context assembled', status: 'done' },
                       { key: 'searching', label: 'Queried vector knowledge store', status: 'done' },
-                      { key: 'inference', label: 'Local Ollama execution completed', status: 'done' }
+                      { key: 'inference', label: `Local neural inference completed (${resolvedModel})`, status: 'done' }
                     ],
                     answer: answerText,
                     findings: data.findings || [
                       {
                         num: '01',
                         title: 'Telemetry & Verification Status',
-                        desc: 'Query verified against local sovereign knowledge base.'
+                        desc: `Query verified against local sovereign knowledge base using ${resolvedModel}.`
                       }
                     ],
                     recommendation: data.recommendation || 'Save output note or export findings to task records.',
                     sources: sourceList,
                     generatedFiles: data.generatedFiles || [],
                     technicalDetails: {
-                      modelsUsed: data.model || 'Sovereign Local Inference',
+                      modelsUsed: resolvedModel,
                       ocrUsed: attachedFiles.length > 0 ? 'Document Parser Active' : 'None',
                       retrievalScope: `${sourceList.length} verified context source(s)`,
                       selectedSources: `${sourceList.length} sources`,

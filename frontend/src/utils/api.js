@@ -225,13 +225,42 @@ export async function getStorageStats() {
 }
 
 /**
- * 10. Interactive Copilot Chat with Gateway and Fallback
+ * 10. Fetch Available AI Models from Gateway / Backend
  */
-export async function sendChatMessage(message, sessionId = 'default_session', selectedDocIds = []) {
+export async function fetchModels() {
+  try {
+    const gatewayRes = await authFetch('/api/models');
+    if (gatewayRes.ok) {
+      return await gatewayRes.json();
+    }
+  } catch (err) {
+    console.warn('[FETCH MODELS VIA GATEWAY FAILED]:', err.message);
+  }
+
+  try {
+    const pythonRes = await fetch(`${BACKEND_FALLBACK}/api/models`);
+    if (pythonRes.ok) {
+      return await pythonRes.json();
+    }
+  } catch (err) {
+    console.warn('[FETCH MODELS DIRECT BACKEND FAILED]:', err.message);
+  }
+
+  return {
+    default: 'auto',
+    models: ['auto', 'llama3.2:3b', 'qwen2.5:7b', 'llama3.1:8b', 'deepseek-r1:7b']
+  };
+}
+
+/**
+ * 11. Interactive Copilot Chat with Gateway and Fallback
+ */
+export async function sendChatMessage(message, sessionId = 'default_session', selectedDocIds = [], modelName = 'auto') {
   const payload = {
     session_id: sessionId,
     message,
     selected_doc_ids: selectedDocIds,
+    model_name: modelName || 'auto'
   };
 
   // 1. Primary: Try Node API Gateway
@@ -264,7 +293,7 @@ export async function sendChatMessage(message, sessionId = 'default_session', se
 }
 
 /**
- * 11. Upload Document to RAG Pipeline
+ * 12. Upload Document to RAG Pipeline
  */
 export async function uploadRAGDocument(file, metadata = {}) {
   const formData = new FormData();
@@ -287,7 +316,7 @@ export async function uploadRAGDocument(file, metadata = {}) {
 }
 
 /**
- * 12. Execute Full Agentic Task & Stream Docx
+ * 13. Execute Full Agentic Task & Stream Docx
  */
 export async function executeAgentTask(taskPrompt, file = null) {
   const formData = new FormData();
@@ -332,6 +361,7 @@ export default {
   downloadCompanyFile,
   deleteCompanyFile,
   getStorageStats,
+  fetchModels,
   sendChatMessage,
   uploadRAGDocument,
   executeAgentTask,
