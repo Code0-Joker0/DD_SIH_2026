@@ -32,3 +32,7 @@ temp_files/
 # OS
 .DS_Store
 Thumbs.db
+
+# Auth backend
+backend/node_modules/
+backend/.env/
