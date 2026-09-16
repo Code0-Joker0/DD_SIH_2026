@@ -5,7 +5,23 @@ import tempfile
 import subprocess
 import shutil
 import uuid
+import ast
 from typing import Dict, Any
+
+FORBIDDEN_MODULES = {'socket', 'requests', 'urllib', 'http', 'ftplib', 'telnetlib', 'httpx'}
+
+def verify_code_safety(source_code: str) -> bool:
+    """Parses code into an AST and blocks imports of network modules."""
+    tree = ast.parse(source_code)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split('.')[0] in FORBIDDEN_MODULES:
+                    raise PermissionError(f"Network module forbidden in sandbox: {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split('.')[0] in FORBIDDEN_MODULES:
+                raise PermissionError(f"Network module forbidden in sandbox: {node.module}")
+    return True
 
 def sanitize_code(code_str: str) -> str:
     """

@@ -6,6 +6,25 @@ import uuid
 import socket
 from typing import Optional, List, Dict, Any
 
+ALLOWED_IP_PREFIXES = ("127.", "10.", "192.168.", "::1", "localhost")
+_original_connect = socket.socket.connect
+
+def sovereign_socket_connect(self, address):
+    host = address[0]
+    # Allow DNS string resolution for localhost
+    if host == "localhost":
+        return _original_connect(self, address)
+        
+    # Block any socket connection targeting an external WAN IP
+    if not any(str(host).startswith(prefix) for prefix in ALLOWED_IP_PREFIXES):
+        raise PermissionError(
+            f"[FIREWALL VIOLATION] Programmatic egress blocked to WAN target: {address}"
+        )
+    return _original_connect(self, address)
+
+# Intercept all low-level socket connections across backend libraries
+socket.socket.connect = sovereign_socket_connect
+
 # Ensure project root is in sys.path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:

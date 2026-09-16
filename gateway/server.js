@@ -6,6 +6,51 @@ import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import http from 'http';
+import https from 'https';
+
+// --- RUNTIME CODE FIREWALL: GLOBAL EGRESS INTERCEPTOR ---
+const ALLOWED_INTERNAL_TARGETS = ['127.0.0.1', 'localhost', '::1'];
+
+function enforceEgressGuard(protocolModule) {
+  const originalRequest = protocolModule.request;
+  protocolModule.request = function (options, ...args) {
+    let hostname = '';
+    if (typeof options === 'string') {
+      try {
+        hostname = new URL(options).hostname;
+      } catch {
+        hostname = options;
+      }
+    } else if (options && (options.hostname || options.host)) {
+      hostname = (options.hostname || options.host).split(':')[0];
+    }
+
+    const isAuthorized =
+      ALLOWED_INTERNAL_TARGETS.includes(hostname) ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('192.168.');
+
+    if (!isAuthorized) {
+      const egressError = new Error(
+        `[SECURITY FIREWALL ERROR] WAN Egress Blocked by Gateway Runtime to: ${hostname}`
+      );
+      egressError.code = 'ENETUNREACH';
+      console.error(`\x1b[31m${egressError.message}\x1b[0m`);
+      
+      // Return a mocked client request that immediately aborts with an error
+      const mockReq = new http.ClientRequest({ createConnection: () => {} });
+      process.nextTick(() => mockReq.emit('error', egressError));
+      return mockReq;
+    }
+
+    return originalRequest.call(protocolModule, options, ...args);
+  };
+}
+
+// Hook both HTTP and HTTPS outbound dispatches
+enforceEgressGuard(http);
+enforceEgressGuard(https);
 
 // Load environment configurations from root or local .env
 dotenv.config();
