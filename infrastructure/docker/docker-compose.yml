@@ -1,4 +1,6 @@
 services:
+
+  # ── Qdrant vector database ─────────────────────────────────────────────────
   qdrant:
     image: qdrant/qdrant:latest
     container_name: ${QDRANT_CONTAINER_NAME:-sih-qdrant}
@@ -8,3 +10,26 @@ services:
       - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - ${QDRANT_STORAGE}:/qdrant/storage
+
+  # ── PostgreSQL (session store, agent state, repositories) ─────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${POSTGRES_CONTAINER_NAME:-sih-postgres}
+    restart: unless-stopped
+    # Run as the host user so the bind-mount directory is writable without sudo.
+    # qdrant_up.sh exports UID/GID before calling docker compose.
+    user: "${UID}:${GID}"
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-sih_db}
+      POSTGRES_USER:     ${POSTGRES_USER:-sih}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ${POSTGRES_STORAGE}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sih} -d ${POSTGRES_DB:-sih_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

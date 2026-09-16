@@ -1,0 +1,31 @@
+# Qdrant vector database configuration
+# Values are loaded from environment variables; this file serves as
+# the authoritative reference for all Qdrant-related settings.
+
+server:
+  url: http://localhost:6333      # override via QDRANT_URL
+  port: 6333                      # REST  (override via QDRANT_PORT)
+  grpc_port: 6334                 # gRPC  (override via QDRANT_GRPC_PORT)
+  container_name: sih-qdrant      # Docker container name
+
+storage:
+  # Host path mounted into the container at /qdrant/storage
+  # Resolved at runtime from: ${DATA_ROOT}/qdrant_storage
+  # dev:    /mnt/shared_drive/qdrant_storage
+  # server: /data/sih26117/qdrant_storage
+  host_path: ${QDRANT_STORAGE}
+
+collection:
+  name: sih_documents             # override via QDRANT_COLLECTION
+  vector_size: 1024               # must match embedding.dimension in models.yaml
+  distance: cosine
+
+# Payload indexes created by scripts/create_indexes.py
+# These enable efficient server-side filtering without scanning all vectors.
+payload_indexes:
+  - field: source
+    type: keyword
+  - field: document_id
+    type: keyword
+  - field: chunk_index
+    type: integer

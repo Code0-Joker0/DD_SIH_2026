@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.config import RERANKER_DEVICE, RERANKER_MODEL
+from app.core.config import settings
 
 
 class BGEReranker:
-	def __init__(self, model_name: str = RERANKER_MODEL, model: Any | None = None,
-			 device: str = RERANKER_DEVICE):
+	def __init__(self, model_name: str = settings.RERANKER_MODEL, model: Any | None = None,
+			 device: str = settings.RERANKER_DEVICE):
 		self.model_name = model_name
 		self._model = model
 		self.device = device

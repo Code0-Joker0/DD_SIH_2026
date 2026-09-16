@@ -1,28 +1,52 @@
 import os
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
+class Settings(BaseSettings):
+    # App
+    PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent.parent
+    DATA_ROOT: str = "/mnt/shared_drive"
+    
+    # vLLM
+    VLLM_BASE_URL: str = "http://127.0.0.1:8000/v1"
+    VLLM_API_KEY: str = "local-vllm"
+    VLLM_MODEL: str = "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ"
+    VLLM_MODEL_REASONING: str = "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ"
+    VLLM_MODEL_CODING: str = "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ"
+    VLLM_MODEL_VL: str = "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ"
+    VLLM_MAX_MODEL_LEN: int = 4096       # mirror of the vLLM --max-model-len flag
+    CONTEXT_BUDGET_RATIO: float = 0.75   # fraction of max_model_len reserved for input tokens
+    
+    # PostgreSQL
+    POSTGRES_DSN: str = "postgresql://ved:pass@127.0.0.1:5432/sih_db"
+    
+    # Qdrant / Search
+    RETRIEVAL_TOP_K: int = 12
+    QDRANT_URL: str = "http://127.0.0.1:6333"
+    QDRANT_COLLECTION: str = "sih_documents"
+    EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    EMBEDDING_DEVICE: str = "cpu"
+    RERANKER_DEVICE: str = "cpu"
+    EMBEDDING_DIMENSION: int = 1024
+    RERANK_TOP_K: int = 5
+    RERANK_MIN_SCORE: float = 0.0
+    CHUNK_SIZE: int = 800
+    CHUNK_OVERLAP: int = 100
+    
+    # API
+    API_HOST: str = "127.0.0.1"
+    API_PORT: int = 8080
 
-def _int_env(name: str, default: int) -> int:
-	value = os.getenv(name)
-	return int(value) if value else default
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True
+    )
+    
+    @property
+    def os_environ(self) -> dict:
+        return dict(os.environ)
 
-
-DATA_ROOT = os.getenv("DATA_ROOT", "/data/sih26117")
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-QDRANT_PORT = _int_env("QDRANT_PORT", 6333)
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "sih_documents")
-EMBEDDING_MODEL = os.getenv("BGE_M3_MODEL", "BAAI/bge-m3")
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
-EMBEDDING_DEVICE = os.getenv("BGE_DEVICE", "cpu")
-RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", "cpu")
-EMBEDDING_DIMENSION = _int_env("EMBEDDING_DIMENSION", 1024)
-RETRIEVAL_TOP_K = _int_env("RETRIEVAL_TOP_K", 12)
-RERANK_TOP_K = _int_env("RERANK_TOP_K", 5)
-RERANK_MIN_SCORE = float(os.getenv("RERANK_MIN_SCORE", "0.0"))
-CHUNK_SIZE = _int_env("CHUNK_SIZE", 800)
-CHUNK_OVERLAP = _int_env("CHUNK_OVERLAP", 100)
-VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://127.0.0.1:8000/v1")
-VLLM_MODEL = os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-Coder-7B-Instruct-AWQ")
-VLLM_API_KEY = os.getenv("VLLM_API_KEY", "local-vllm")
-VLLM_TIMEOUT = float(os.getenv("VLLM_TIMEOUT", "120"))
-API_HOST = os.getenv("API_HOST", "127.0.0.1")
-API_PORT = _int_env("API_PORT", 8080)
+settings = Settings()

@@ -1,27 +1,71 @@
 from __future__ import annotations
 
-from typing import Any
+import asyncio
 
-from app.core.config import QDRANT_COLLECTION, RETRIEVAL_TOP_K
-from app.vector_db.qdrant_client import get_qdrant_client
+from qdrant_client import AsyncQdrantClient
+
+from app.core.config import settings
+from app.rag.embedder import BGEEmbedder
 
 
 class QdrantRetriever:
-	def __init__(self, client: Any | None = None, collection_name: str = QDRANT_COLLECTION):
-		self.client = client or get_qdrant_client()
-		self.collection_name = collection_name
+    """Retrieves candidate chunks from Qdrant.
 
-	def search(self, vector: list[float], limit: int = RETRIEVAL_TOP_K) -> list[dict[str, Any]]:
-		try:
-			response = self.client.query_points(
-				collection_name=self.collection_name,
-				query=vector,
-				limit=limit,
-				with_payload=True,
-			)
-		except Exception as error:
-			raise RuntimeError("Qdrant retrieval failed") from error
-		return [
-			{"id": str(point.id), "score": float(point.score), "payload": point.payload or {}}
-			for point in response.points
-		]
+    ``search()`` is the single public method.  It returns a list of plain
+    dicts so the rest of the pipeline (reranker, context builder, tools)
+    never imports Qdrant types — the vector store is fully encapsulated here.
+
+    Return format per item::
+
+        {
+            "id":      <str | int>,   # Qdrant point id
+            "score":   <float>,       # cosine similarity score
+            "payload": {              # whatever was stored at ingest time
+                "text": "...",
+                "source": "...",
+                "document_id": "...",
+                ...
+            }
+        }
+    """
+
+    def __init__(self) -> None:
+        self.client = AsyncQdrantClient(url=settings.QDRANT_URL)
+        self.collection_name = settings.QDRANT_COLLECTION
+        self.embedder = BGEEmbedder()
+
+    async def search(
+        self,
+        query: str,
+        limit: int = settings.RETRIEVAL_TOP_K,
+    ) -> list[dict]:
+        """Embed *query* and return the top-*limit* matching chunks as dicts.
+
+        Retrieve generously (callers should pass a larger *limit* than they
+        ultimately need) so the reranker has sufficient candidates to work on.
+        """
+        # BGEEmbedder is synchronous — run in thread pool to avoid blocking.
+        vector = await asyncio.to_thread(self.embedder.embed_query, query)
+
+        try:
+            response = await self.client.query_points(
+                collection_name=self.collection_name,
+                query=vector,
+                limit=limit,
+                with_payload=True,
+            )
+        except Exception as error:
+            raise RuntimeError(f"Qdrant retrieval failed: {error}") from error
+
+        return [
+            {
+                "id": point.id,
+                "score": point.score,
+                "payload": point.payload or {},
+            }
+            for point in response.points
+            if (point.payload or {}).get("text")  # skip points without text
+        ]
+
+
+retriever = QdrantRetriever()

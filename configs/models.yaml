@@ -1,0 +1,31 @@
+# LLM model configuration
+# Values are loaded from environment variables; this file serves as
+# the authoritative reference for all model-related settings.
+
+llm:
+  # Model served by vLLM  (override via VLLM_MODEL)
+  # dev:    Qwen/Qwen2.5-Coder-7B-Instruct-AWQ
+  # server: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  model: Qwen/Qwen2.5-Coder-7B-Instruct-AWQ
+  base_url: http://127.0.0.1:8000/v1
+  api_key: local-vllm
+  timeout_seconds: 120
+  temperature: 0.2
+
+embedding:
+  model: BAAI/bge-m3           # override via BGE_M3_MODEL
+  device: cpu                  # cpu | cuda  (override via BGE_DEVICE)
+  dimension: 1024              # must match Qdrant collection vector size
+
+reranker:
+  model: BAAI/bge-reranker-v2-m3  # override via RERANKER_MODEL
+  device: cpu                      # cpu | cuda  (override via RERANKER_DEVICE)
+
+retrieval:
+  top_k: 12          # candidates fetched from Qdrant before reranking
+  rerank_top_k: 5    # top N returned after reranking
+  rerank_min_score: 0.0  # discard results below this rerank score
+
+chunking:
+  chunk_size: 800    # characters per chunk
+  chunk_overlap: 100 # overlap between consecutive chunks

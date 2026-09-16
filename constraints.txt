@@ -1,3 +1,16 @@
+# constraints.txt — pass to every uv pip install with --constraint
+#
+# These pins prevent future installs from silently downgrading packages that
+# vLLM's precompiled CUDA kernels (Marlin AWQ, FlashInfer, flash-attention)
+# link against at runtime.
+#
+# Usage:
+#   uv pip install --constraint constraints.txt <packages>
+
+# ── cu12 CUDA runtime (required alongside cu13 vLLM wheels) ───────────────
+# vLLM 0.28's compiled kernels link against libcudart.so.12 even though the
+# headline wheel targets CUDA 13. These packages provide the missing .so.12
+# files and must not be dropped by a future resolver.
 nvidia-cuda-runtime-cu12>=12.4
 nvidia-cublas-cu12>=12.4
 nvidia-cudnn-cu12>=9.1

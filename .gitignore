@@ -1,15 +1,22 @@
-.git
+# Secrets — never commit
 .env
 .env.dev
 .env.server
+
+# Runtime artifacts
 scripts/*.pid
-/data/
 *.log
+
+# Data directories
+/data/
+
+# Python
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Scratch / notes (kept locally, not for repo)
 hello.txt
 explain.txt
-# temp.txt
-
+temp.txt

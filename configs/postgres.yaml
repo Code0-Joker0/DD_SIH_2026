@@ -1,0 +1,42 @@
+# PostgreSQL configuration reference
+# Values are loaded from environment variables; this file serves as
+# the authoritative reference for all PostgreSQL-related settings.
+#
+# PostgreSQL is used as the persistent backing store for:
+#   - LangGraph agent state / checkpointing
+#   - Chat session history (repositories/chat_repository.py)
+#   - Document metadata (repositories/document_repository.py)
+#   - Agent execution logs (repositories/execution_repository.py)
+
+server:
+  host: localhost                     # override via POSTGRES_HOST (future)
+  port: 5432                          # override via POSTGRES_PORT
+  container_name: sih-postgres        # Docker container name
+
+database:
+  name: sih_db                        # override via POSTGRES_DB
+  user: sih                           # override via POSTGRES_USER
+  # password: set via POSTGRES_PASSWORD env var — never hardcode here
+
+storage:
+  # Host path bind-mounted into the container at /var/lib/postgresql/data
+  # Resolved at runtime from: ${DATA_ROOT}/postgre_storage
+  # dev:    /mnt/shared_drive/postgre_storage
+  # server: /data/sih26117/postgre_storage
+  host_path: ${POSTGRES_STORAGE}
+
+connection:
+  # Full DSN for SQLAlchemy / asyncpg / psycopg — assembled from vars above.
+  # POSTGRES_URL=postgresql://<user>:<password>@<host>:<port>/<db>
+  # For async SQLAlchemy use: postgresql+asyncpg://...
+  url: ${POSTGRES_URL}
+
+image:
+  name: postgres
+  tag: 16-alpine      # pinned major version; alpine for minimal image size
+
+healthcheck:
+  command: pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
+  interval: 10s
+  timeout: 5s
+  retries: 5

@@ -1,0 +1,34 @@
+# Agentic workflow configuration
+# This project uses LangGraph for multi-agent orchestration.
+# Agent implementations live in apps/api/app/agents/ and
+# graph definitions in apps/api/app/workflows/.
+
+planner:
+  # Decomposes a user query into a sequence of sub-tasks
+  description: "Breaks a complex query into retrieval + generation sub-tasks"
+  max_steps: 10
+
+router:
+  # Decides which specialist agent handles a given sub-task
+  description: "Routes sub-tasks to retrieval, analysis, validation, or generation agents"
+
+agents:
+  retrieval:
+    # Calls the RAG retriever + reranker to fetch relevant context
+    description: "Fetches and ranks document chunks from Qdrant"
+
+  analysis:
+    # Analyses retrieved context for relevance and completeness
+    description: "Validates context quality and flags gaps"
+
+  validation:
+    # Checks the generated answer for factual grounding
+    description: "Verifies the answer is grounded in the supplied context"
+
+  generation:
+    # Calls vLLM to generate a grounded answer from context
+    description: "Generates the final response using the LLM"
+
+workflow:
+  # LangGraph checkpointer backend (none | memory | sqlite)
+  checkpointer: memory
