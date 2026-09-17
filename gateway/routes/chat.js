@@ -6,6 +6,7 @@ import FormData from 'form-data';
 import db from '../db/index.js';
 import { encryptBuffer } from '../utils/fileCrypto.js';
 import { optionalAuth } from '../middleware/auth.js';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -117,6 +118,17 @@ async function persistToVault(file, user, chatTitle = 'Chat Session') {
 /**
  * Main Chat Handler supporting both JSON payloads and multipart/form-data with attachments
  */
+/**
+ * Utility to strip Data URI schemes and whitespace from base64 strings
+ */
+function sanitizeBase64(rawB64) {
+  if (!rawB64 || typeof rawB64 !== 'string') return '';
+  if (rawB64.includes(',')) {
+    rawB64 = rawB64.split(',')[1];
+  }
+  return rawB64.trim().replace(/\r?\n/g, '');
+}
+
 async function handleChatMessage(req, res) {
   try {
     const user = req.user || { id: null, username: 'anonymous', full_name: 'Enterprise Engineer', department: 'General' };
@@ -128,6 +140,7 @@ async function handleChatMessage(req, res) {
       history,
       document_context,
       model_name,
+      images,
       chatTitle
     } = req.body;
 
@@ -169,7 +182,13 @@ async function handleChatMessage(req, res) {
       }
     }
 
-    if (!queryMessage && allFiles.length === 0) {
+    // Process any JSON base64 images from req.body
+    const rawImages = images || req.body.images || [];
+    const cleanImages = (Array.isArray(rawImages) ? rawImages : [rawImages])
+      .map(sanitizeBase64)
+      .filter(Boolean);
+
+    if (!queryMessage && allFiles.length === 0 && cleanImages.length === 0) {
       return res.status(400).json({ error: 'Message or at least one file attachment is required' });
     }
 
@@ -225,7 +244,8 @@ async function handleChatMessage(req, res) {
         selected_doc_ids: typeof selected_doc_ids === 'string' ? JSON.parse(selected_doc_ids || '[]') : (selected_doc_ids || []),
         history: typeof history === 'string' ? JSON.parse(history || '[]') : (history || []),
         document_context: document_context || null,
-        model_name: model_name || 'auto'
+        model_name: model_name || 'auto',
+        images: cleanImages
       }, {
         timeout: 180000
       });
@@ -239,6 +259,41 @@ async function handleChatMessage(req, res) {
       files: successfulVaultUploads.map((f) => ({ id: f.id, name: f.original_name, category: f.category }))
     };
 
+    // 3. Persist the Chat Session and Messages to PostgreSQL
+    if (user && user.id && session_id) {
+      try {
+        // Ensure conversation exists
+        await db.query(
+          `INSERT INTO conversations (id, user_id, title)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (id) DO NOTHING`,
+          [session_id, user.id, chatTitle || 'New Conversation']
+        );
+
+        // Update updated_at
+        await db.query(`UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [session_id]);
+
+        // Insert user message
+        if (queryMessage) {
+          await db.query(
+            `INSERT INTO messages (id, conversation_id, sender, content) VALUES ($1, $2, $3, $4)`,
+            [crypto.randomUUID(), session_id, 'user', queryMessage]
+          );
+        }
+
+        // Insert AI response
+        const aiContent = backendResponse.response || backendResponse.answer || '';
+        if (aiContent) {
+          await db.query(
+            `INSERT INTO messages (id, conversation_id, sender, content) VALUES ($1, $2, $3, $4)`,
+            [crypto.randomUUID(), session_id, 'assistant', aiContent]
+          );
+        }
+      } catch (dbErr) {
+        console.error('[CHAT DB PERSISTENCE ERROR]:', dbErr);
+      }
+    }
+
     return res.json(backendResponse);
   } catch (err) {
     console.error('[CHAT VAULT PIPELINE ERROR]:', err);
@@ -249,6 +304,51 @@ async function handleChatMessage(req, res) {
     });
   }
 }
+
+// GET /api/chat/conversations
+router.get('/conversations', optionalAuth, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const result = await db.query(
+      `SELECT id, title, created_at, updated_at 
+       FROM conversations 
+       WHERE user_id = $1 
+       ORDER BY updated_at DESC`,
+      [userId]
+    );
+    return res.json({ success: true, conversations: result.rows });
+  } catch (err) {
+    console.error('[CONVERSATIONS FETCH ERROR]:', err);
+    return res.status(500).json({ error: 'Failed to fetch conversation history' });
+  }
+});
+
+// GET /api/chat/conversations/:id/messages
+router.get('/conversations/:id/messages', optionalAuth, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { id } = req.params;
+
+    // Verify ownership
+    const convCheck = await db.query(`SELECT id FROM conversations WHERE id = $1 AND user_id = $2`, [id, userId]);
+    if (convCheck.rows.length === 0) return res.status(403).json({ error: 'Forbidden' });
+
+    const result = await db.query(
+      `SELECT id, sender, content, created_at 
+       FROM messages 
+       WHERE conversation_id = $1 
+       ORDER BY created_at ASC`,
+      [id]
+    );
+    return res.json({ success: true, messages: result.rows });
+  } catch (err) {
+    console.error('[MESSAGES FETCH ERROR]:', err);
+    return res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
 
 // Routes
 router.post('/message', optionalAuth, uploadFields, handleChatMessage);

@@ -5,7 +5,11 @@ import uuid
 import json
 import base64
 import io
+import httpx
+import logging
 from typing import TypedDict, List, Optional, Dict, Any, Tuple
+
+logger = logging.getLogger("vision")
 
 # Ensure project root is in sys.path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -61,11 +65,195 @@ import concurrent.futures
 
 _ollama_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
+def sanitize_base64(raw_b64: str, max_dimension: int = 768) -> str:
+    if not raw_b64:
+        return ""
+    # Remove data URI prefixes like 'data:image/png;base64,'
+    if "," in raw_b64:
+        raw_b64 = raw_b64.split(",", 1)[1]
+    cleaned = raw_b64.strip().replace("\n", "").replace("\r", "")
+    if not cleaned:
+        return ""
+
+    # Downsample excessively large images to conserve vision token context window
+    try:
+        img_bytes = base64.b64decode(cleaned)
+        img = Image.open(io.BytesIO(img_bytes))
+        w, h = img.size
+        if max(w, h) > max_dimension:
+            img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+            out_buf = io.BytesIO()
+            img_format = img.format if img.format in ["PNG", "JPEG", "WEBP"] else "JPEG"
+            img.convert("RGB").save(out_buf, format=img_format, quality=85)
+            return base64.b64encode(out_buf.getvalue()).decode("utf-8")
+    except Exception:
+        pass
+
+    return cleaned
+
+async def query_ollama_vision(
+    prompt: str,
+    base64_images: List[str],
+    system_prompt: str = "",
+    model: str = "qwen2.5vl:3b",
+    history: Optional[List[Dict[str, Any]]] = None
+) -> str:
+    clean_images = [sanitize_base64(img, max_dimension=768) for img in base64_images if img]
+    clean_images = [img for img in clean_images if img]
+
+    # Keep conversation history bounded to recent turns to prevent context overflow
+    bounded_history = history[-4:] if (history and len(history) > 4) else (history or [])
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    for turn in bounded_history:
+        role = turn.get("role")
+        content = turn.get("content") or turn.get("text") or ""
+        if role in ["user", "assistant"] and content:
+            messages.append({"role": role, "content": content})
+
+    messages.append({
+        "role": "user",
+        "content": prompt,
+        "images": clean_images  # List of clean base64 strings
+    })
+
+    payload = {
+        "model": model or "qwen2.5vl:3b",
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "num_ctx": 6144,
+            "num_predict": 1024,
+            "temperature": 0.2
+        }
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            response = await client.post(f"{VLLM_BASE_URL}/api/chat", json=payload)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("message", {}).get("content", "")
+            
+            # If 400 occurs due to context or allocation, attempt compact retry
+            err_text = response.text
+            print(f"[OLLAMA VISION HTTP ERROR]: status={response.status_code}, response={err_text}")
+            logger.warning(f"[OLLAMA VISION 400 RETRY]: Retrying with compact 512px downsampling...")
+            
+            compact_images = [sanitize_base64(img, max_dimension=512) for img in clean_images]
+            compact_payload = {
+                "model": model or "qwen2.5vl:3b",
+                "messages": [
+                    {"role": "system", "content": (system_prompt[:800] if system_prompt else "")},
+                    {"role": "user", "content": prompt, "images": compact_images}
+                ],
+                "stream": False,
+                "options": {
+                    "num_ctx": 4096,
+                    "num_predict": 768,
+                    "temperature": 0.2
+                }
+            }
+            retry_res = await client.post(f"{VLLM_BASE_URL}/api/chat", json=compact_payload)
+            if retry_res.status_code == 200:
+                return retry_res.json().get("message", {}).get("content", "")
+
+            raise RuntimeError(f"Ollama error {response.status_code}: {err_text}")
+        except Exception as exc:
+            logger.error(f"[VISION INFERENCE FAILED]: {str(exc)}")
+            print(f"[VISION INFERENCE FAILED]: {str(exc)}")
+            raise exc
+
+def query_ollama_vision_sync(
+    prompt: str,
+    base64_images: List[str],
+    system_prompt: str = "",
+    model: str = "qwen2.5vl:3b",
+    history: Optional[List[Dict[str, Any]]] = None
+) -> str:
+    clean_images = [sanitize_base64(img, max_dimension=768) for img in base64_images if img]
+    clean_images = [img for img in clean_images if img]
+
+    # Keep conversation history bounded to recent turns to prevent context overflow
+    bounded_history = history[-4:] if (history and len(history) > 4) else (history or [])
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    for turn in bounded_history:
+        role = turn.get("role")
+        content = turn.get("content") or turn.get("text") or ""
+        if role in ["user", "assistant"] and content:
+            messages.append({"role": role, "content": content})
+
+    messages.append({
+        "role": "user",
+        "content": prompt,
+        "images": clean_images  # List of clean base64 strings
+    })
+
+    payload = {
+        "model": model or "qwen2.5vl:3b",
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "num_ctx": 6144,
+            "num_predict": 1024,
+            "temperature": 0.2
+        }
+    }
+
+    with httpx.Client(timeout=120.0) as client:
+        try:
+            response = client.post(f"{VLLM_BASE_URL}/api/chat", json=payload)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("message", {}).get("content", "")
+
+            # If 400 occurs due to context or allocation, attempt compact retry
+            err_text = response.text
+            print(f"[OLLAMA VISION HTTP ERROR]: status={response.status_code}, response={err_text}")
+            logger.warning(f"[OLLAMA VISION 400 RETRY]: Retrying with compact 512px downsampling...")
+
+            compact_images = [sanitize_base64(img, max_dimension=512) for img in clean_images]
+            compact_payload = {
+                "model": model or "qwen2.5vl:3b",
+                "messages": [
+                    {"role": "system", "content": (system_prompt[:800] if system_prompt else "")},
+                    {"role": "user", "content": prompt, "images": compact_images}
+                ],
+                "stream": False,
+                "options": {
+                    "num_ctx": 4096,
+                    "num_predict": 768,
+                    "temperature": 0.2
+                }
+            }
+            retry_res = client.post(f"{VLLM_BASE_URL}/api/chat", json=compact_payload)
+            if retry_res.status_code == 200:
+                return retry_res.json().get("message", {}).get("content", "")
+
+            raise RuntimeError(f"Ollama error {response.status_code}: {err_text}")
+        except Exception as exc:
+            logger.error(f"[VISION INFERENCE FAILED]: {str(exc)}")
+            print(f"[VISION INFERENCE FAILED]: {str(exc)}")
+            raise exc
+
 def safe_ollama_generate(model: str, prompt: str, images: Optional[List[str]] = None, timeout: float = 30.0) -> Optional[str]:
     if not is_ollama_online():
         return None
     try:
-        future = _ollama_executor.submit(lambda: ollama.generate(model=model, prompt=prompt, images=images))
+        clean_imgs = [sanitize_base64(img, max_dimension=768) for img in (images or []) if img] if images else None
+        future = _ollama_executor.submit(lambda: ollama.generate(
+            model=model,
+            prompt=prompt,
+            images=clean_imgs,
+            options={"num_ctx": 6144, "temperature": 0.2}
+        ))
         res = future.result(timeout=timeout)
         return res.get("response", "").strip()
     except Exception as e:
@@ -76,7 +264,11 @@ def safe_ollama_chat(model: str, messages: List[Dict[str, Any]], timeout: float 
     if not is_ollama_online():
         return None
     try:
-        future = _ollama_executor.submit(lambda: ollama.chat(model=model, messages=messages, options={"temperature": 0.2}))
+        future = _ollama_executor.submit(lambda: ollama.chat(
+            model=model,
+            messages=messages,
+            options={"num_ctx": 6144, "temperature": 0.2}
+        ))
         res = future.result(timeout=timeout)
         return res.get("message", {}).get("content", "").strip()
     except Exception as e:
@@ -151,9 +343,9 @@ def extract_document_content(
                 img = Image.open(io.BytesIO(file_bytes))
                 buf = io.BytesIO()
                 img.convert("RGB").save(buf, format="JPEG")
-                extracted_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                extracted_b64 = sanitize_base64(base64.b64encode(buf.getvalue()).decode("utf-8"))
             except Exception:
-                extracted_b64 = base64.b64encode(file_bytes).decode("utf-8")
+                extracted_b64 = sanitize_base64(base64.b64encode(file_bytes).decode("utf-8"))
         return doc_text, extracted_b64, file_type
 
     if file_path and os.path.exists(file_path):
@@ -199,10 +391,10 @@ def extract_document_content(
                 img = Image.open(file_path)
                 buf = io.BytesIO()
                 img.convert("RGB").save(buf, format="JPEG")
-                extracted_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                extracted_b64 = sanitize_base64(base64.b64encode(buf.getvalue()).decode("utf-8"))
             except Exception:
                 with open(file_path, "rb") as f:
-                    extracted_b64 = base64.b64encode(f.read()).decode("utf-8")
+                    extracted_b64 = sanitize_base64(base64.b64encode(f.read()).decode("utf-8"))
         elif any(lower_path.endswith(ext) for ext in [".txt", ".csv", ".json", ".xml", ".log", ".md"]):
             file_type = "text"
             try:
@@ -691,14 +883,18 @@ def chat_agent_reason(
         )
 
     if document_context:
-        system_prompt += f"\n\n[ACTIVE UPLOADED INSPECTION DOCUMENT CONTEXT]\n{document_context}"
+        if has_images:
+            doc_snippet = document_context[:1500] + ("..." if len(document_context) > 1500 else "")
+            system_prompt += f"\n\n[ACTIVE UPLOADED INSPECTION DOCUMENT CONTEXT]\n{doc_snippet}"
+        else:
+            system_prompt += f"\n\n[ACTIVE UPLOADED INSPECTION DOCUMENT CONTEXT]\n{document_context}"
 
     rag_context = ""
     try:
         search_query = message
         if selected_doc_ids:
             search_query += " " + " ".join(selected_doc_ids)
-        rag_context = search_local_sops(search_query, n_results=2)
+        rag_context = search_local_sops(search_query, n_results=1 if has_images else 2)
     except Exception:
         pass
 
@@ -712,15 +908,27 @@ def chat_agent_reason(
         chosen_model = "qwen2.5vl:3b"
 
     # Clean raw base64 strings for Ollama
-    clean_images = []
-    if has_images:
-        for b64 in images_b64:
-            if "," in b64:
-                clean_images.append(b64.split(",")[-1])
-            else:
-                clean_images.append(b64)
+    clean_images = [sanitize_base64(img) for img in (images_b64 or []) if img]
+    clean_images = [img for img in clean_images if img]
 
-    # 1. Primary: Direct explicit client call to Ollama
+    # Dedicated Multi-Modal Vision Pipeline
+    if has_images:
+        try:
+            reply = query_ollama_vision_sync(
+                prompt=message,
+                base64_images=clean_images,
+                system_prompt=system_prompt,
+                model=chosen_model,
+                history=history
+            )
+            if reply:
+                return reply
+        except Exception as exc:
+            logger.error(f"[VISION INFERENCE FAILED]: {str(exc)}")
+            print(f"[VISION INFERENCE FAILED]: {str(exc)}")
+            return f"⚠️ **Vision Inference Error**: {str(exc)}"
+
+    # Text-only Primary: Direct explicit client call to Ollama
     try:
         client = ollama.Client(host=VLLM_BASE_URL)
         ollama_messages = [{"role": "system", "content": system_prompt}]
@@ -732,8 +940,6 @@ def chat_agent_reason(
                     ollama_messages.append({"role": role, "content": content})
 
         user_turn = {"role": "user", "content": message}
-        if clean_images:
-            user_turn["images"] = clean_images
         ollama_messages.append(user_turn)
 
         res = client.chat(
@@ -748,7 +954,7 @@ def chat_agent_reason(
         import traceback
         print(f"[chat_agent_reason Ollama Client Error on model '{chosen_model}']:\n{traceback.format_exc()}")
 
-    # 2. Secondary: Direct HTTP POST to Ollama /api/chat
+    # Secondary: Direct HTTP POST to Ollama /api/chat
     try:
         import requests
         http_res = requests.post(
@@ -768,13 +974,6 @@ def chat_agent_reason(
     except Exception as http_err:
         import traceback
         print(f"[chat_agent_reason Direct HTTP Fallback Error on model '{chosen_model}']:\n{traceback.format_exc()}")
-
-    # Return explicit error payload rather than substituting false technical findings
-    if has_images:
-        return (
-            f"⚠️ **Vision Inference Error**: The local multi-modal vision engine (`{chosen_model}`) encountered an error during image processing.\n"
-            f"Please verify that Ollama is actively running with `{chosen_model}` available on `{VLLM_BASE_URL}`."
-        )
 
     return (
         f"⚠️ **Inference Engine Unreachable**: Could not complete reasoning on local model `{chosen_model}`. "

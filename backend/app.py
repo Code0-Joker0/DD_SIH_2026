@@ -86,7 +86,9 @@ from backend.agent import (
     run_agent_task,
     run_pipeline,
     chat_agent_reason,
-    extract_document_content
+    extract_document_content,
+    sanitize_base64,
+    query_ollama_vision
 )
 from backend.tools import OUTPUTS_DIR
 from backend.sandbox import execute_in_sandbox, verify_code_safety
@@ -479,12 +481,15 @@ async def chat_endpoint(payload: ChatRequest):
     if rag_context:
         combined_doc_context = f"{combined_doc_context}\n\nRetrieved Knowledge:\n{rag_context}".strip()
 
+    clean_payload_images = [sanitize_base64(img) for img in (payload.images or []) if img]
+    clean_payload_images = [img for img in clean_payload_images if img]
+
     if requested_model == "auto":
         resolved_model = select_optimal_model(
             query=message,
             sources_count=len(sources),
             doc_context_len=len(combined_doc_context),
-            has_images=bool(payload.images and len(payload.images) > 0)
+            has_images=bool(clean_payload_images and len(clean_payload_images) > 0)
         )
     else:
         resolved_model = requested_model
@@ -496,7 +501,7 @@ async def chat_endpoint(payload: ChatRequest):
             selected_doc_ids=selected_doc_ids,
             document_context=combined_doc_context,
             model_name=resolved_model,
-            images_b64=payload.images if payload.images else None
+            images_b64=clean_payload_images if clean_payload_images else None
         )
 
         if not reply or "unable to provide" in reply.lower() or "without access to" in reply.lower():
@@ -603,7 +608,9 @@ async def analyze_multimodal_endpoint(
                 filename=img_file.filename
             )
             if b64_str:
-                images_base64.append(b64_str)
+                clean_b64 = sanitize_base64(b64_str)
+                if clean_b64:
+                    images_base64.append(clean_b64)
             processed_images.append({
                 "filename": img_file.filename,
                 "size": len(img_bytes)

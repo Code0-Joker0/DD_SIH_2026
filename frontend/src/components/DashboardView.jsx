@@ -33,19 +33,19 @@ import AdminConsoleView from './admin/AdminConsoleView';
 import LoginCard from './LoginCard';
 import { useTheme } from '../context/useTheme';
 import { useAuth } from '../context/AuthContext';
-import { INITIAL_CHATS, INITIAL_SOURCE_FILES } from '../data/chatStore';
-import { sendChatMessage, uploadRAGDocument } from '../utils/api';
+import { sendChatMessage, uploadRAGDocument, fetchConversations, fetchConversationMessages } from '../utils/api';
+import { INITIAL_SOURCE_FILES } from '../data/chatStore';
 
-const createBlankChat = () => ({
+const createBlankChat = (userId) => ({
   id: `chat_${Date.now()}`,
   title: 'New Conversation',
-  userId: 'usr_rkulkarni',
+  userId: userId || 'usr_anonymous',
   createdDate: 'Just now',
   updatedDate: 'Just now',
   pinned: false,
   archived: false,
   attachedFileIds: [],
-  selectedSourceDocumentIds: ['doc_001', 'doc_002'],
+  selectedSourceDocumentIds: [],
   knowledgeScope: 'selected',
   aiMode: 'Auto (Recommended)',
   messages: []
@@ -59,9 +59,40 @@ export default function DashboardView() {
   const [activeTab, setActiveTab] = useState('Chat'); // 'Chat' | 'Knowledge' | 'Documents' | 'History' | 'Settings'
 
   // Chats state
-  const [chats, setChats] = useState(() => [createBlankChat(), ...INITIAL_CHATS]);
-  const [activeChatId, setActiveChatId] = useState(() => chats[0]?.id || 'chat_init');
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(null);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+
+  // Fetch true chat history when user authenticates
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      fetchConversations()
+        .then(data => {
+          if (data && data.length > 0) {
+            const mappedChats = data.map(c => ({
+              id: c.id,
+              title: c.title,
+              userId: user.id,
+              createdDate: new Date(c.created_at).toLocaleString(),
+              updatedDate: new Date(c.updated_at).toLocaleString(),
+              pinned: false,
+              archived: false,
+              messages: []
+            }));
+            setChats(mappedChats);
+            setActiveChatId(mappedChats[0].id);
+          } else {
+            const blank = createBlankChat(user.id);
+            setChats([blank]);
+            setActiveChatId(blank.id);
+          }
+        })
+        .catch(console.error);
+    } else {
+      setChats([]);
+      setActiveChatId(null);
+    }
+  }, [isAuthenticated, user?.id]);
 
   // Chat action dropdown & edit states
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
@@ -86,7 +117,31 @@ export default function DashboardView() {
   }, [openChatMenuId]);
 
   // Active chat object lookup
-  const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
+  const activeChat = chats.find(c => c.id === activeChatId) || chats[0] || createBlankChat(user?.id);
+
+  // Fetch messages for active chat if they haven't been loaded yet
+  useEffect(() => {
+    if (activeChatId && activeChat && activeChat.messages.length === 0 && !activeChat.id.startsWith('chat_init') && !activeChatId.startsWith('chat_1')) {
+      fetchConversationMessages(activeChatId)
+        .then(messages => {
+          if (messages && messages.length > 0) {
+            setChats(prev => prev.map(c => {
+              if (c.id === activeChatId) {
+                return { ...c, messages: messages.map(m => ({
+                  id: m.id,
+                  sender: m.sender === 'user' ? 'user' : 'ai',
+                  timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  content: m.content,
+                  attachedFiles: [] // Or load from metadata if stored
+                }))};
+              }
+              return c;
+            }));
+          }
+        })
+        .catch(console.error);
+    }
+  }, [activeChatId]);
 
   // -------------------------------------------------------------
   // PATTERN A: GATE GUARDS
@@ -174,9 +229,9 @@ export default function DashboardView() {
   // -------------------------------------------------------------
 
   const handleStartNewChat = () => {
-    const newChatObj = createBlankChat();
-    setChats(prev => [newChatObj, ...prev]);
-    setActiveChatId(newChatObj.id);
+    const blank = createBlankChat(user?.id);
+    setChats(prev => [blank, ...prev]);
+    setActiveChatId(blank.id);
     setActiveTab('Chat');
   };
 
@@ -277,7 +332,7 @@ export default function DashboardView() {
       const resolvedModel = data.resolved_model || data.model || selectedModel;
       const sourceList = Array.isArray(data.sources) && data.sources.length > 0
         ? data.sources.map(s => typeof s === 'string' ? s : s.filename || s.title || 'Referenced Document')
-        : INITIAL_SOURCE_FILES.slice(0, Math.min(sourcesCount || 2, 3)).map(d => d.name);
+        : (Array.isArray(INITIAL_SOURCE_FILES) ? INITIAL_SOURCE_FILES : []).slice(0, Math.min(sourcesCount || 2, 3)).map(d => d.name || d.title || 'Source Document');
 
       setChats(prev => prev.map(chat => {
         if (chat.id === targetChatId) {

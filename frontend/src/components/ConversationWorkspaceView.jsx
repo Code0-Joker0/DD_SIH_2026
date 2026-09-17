@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { INITIAL_SOURCE_FILES } from '../data/chatStore';
 import { executeAgentTask, fetchModels } from '../utils/api';
+import ReactMarkdown from 'react-markdown';
 
 const SUGGESTION_CHIPS = [
   'Analyze',
@@ -44,6 +45,38 @@ const MODEL_LABEL_MAP = {
 };
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.webp', '.txt', '.csv', '.bmp'];
+
+const RotatingLoadingText = ({ selectedModel }) => {
+  const [index, setIndex] = useState(0);
+  const statements = selectedModel === 'auto'
+    ? [
+        'Evaluating intent & routing to optimal Singularity model...',
+        'Initializing neural inference engine...',
+        'Synthesizing document context...',
+        'Applying regulatory constraints...',
+        'Generating comprehensive response...'
+      ]
+    : [
+        `Allocating weights for ${selectedModel}...`,
+        'Initializing neural inference engine...',
+        'Synthesizing document context...',
+        'Cross-referencing knowledge base...',
+        'Generating comprehensive response...'
+      ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIndex((prev) => (prev + 1) % statements.length);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [statements.length]);
+
+  return (
+    <span className="singularity-loading-statement-text animate-pulse">
+      {statements[index]}
+    </span>
+  );
+};
 
 export default function ConversationWorkspaceView({ activeChat, onSendMessage }) {
   const [promptInput, setPromptInput] = useState('');
@@ -466,20 +499,18 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                 {(msg.sender === 'ai' || msg.role === 'assistant') && (
                   <div className="ai-message-wrapper">
                     {(msg.taskRun?.executionStatus === 'Processing' || (!msg.taskRun?.answer && !msg.content && !msg.text)) ? (
-                      <div className="flex items-start gap-3 p-3.5 my-3 bg-slate-900/70 border border-amber-500/30 rounded-xl text-slate-300 text-xs animate-pulse shadow-md w-full max-w-xl">
-                        <div className="relative flex h-3 w-3 mt-0.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                      <div className="singularity-chat-loading-box">
+                        <div className="singularity-loader-wrapper">
+                          <div className="singularity-loader-glow"></div>
+                          <div className="singularity-loader-ring"></div>
+                          <img
+                            src="/assets/singularity_logo.png"
+                            alt="Singularity"
+                            className="singularity-loader-logo"
+                          />
                         </div>
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-semibold text-amber-300">
-                            {selectedModel === 'auto'
-                              ? 'Evaluating intent & routing to optimal Singularity model...'
-                              : `Allocating weights for ${selectedModel}...`}
-                          </span>
-                          <span className="text-[11px] text-slate-400">
-                            Swapping model weights in RTX 3050 VRAM & synthesizing Qdrant knowledge context
-                          </span>
+                        <div className="singularity-loading-statement-wrapper">
+                          <RotatingLoadingText selectedModel={selectedModel} />
                         </div>
                       </div>
                     ) : (
@@ -488,12 +519,16 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                         {/* 1. MAIN ANSWER BODY */}
                         {msg.taskRun?.answer && (
                           <div className="ai-answer-section">
-                            <p className="ai-answer-text">{msg.taskRun.answer}</p>
+                            <div className="ai-answer-text markdown-body">
+                              <ReactMarkdown>{msg.taskRun.answer}</ReactMarkdown>
+                            </div>
                           </div>
                         )}
                         {(!msg.taskRun?.answer && (msg.content || msg.text)) && (
                           <div className="ai-answer-section">
-                            <p className="ai-answer-text">{msg.content || msg.text}</p>
+                            <div className="ai-answer-text markdown-body">
+                              <ReactMarkdown>{msg.content || msg.text}</ReactMarkdown>
+                            </div>
                           </div>
                         )}
 

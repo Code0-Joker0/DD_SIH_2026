@@ -105,3 +105,34 @@ CREATE TRIGGER trg_company_files_updated_at
 BEFORE UPDATE ON company_files
 FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
+-- ----------------------------------------------------------------------------
+-- 5. Chat History & Conversations (Per-User Isolation)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS conversations (
+    id VARCHAR(255) PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) DEFAULT 'New Inspection Analysis',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    conversation_id VARCHAR(255) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    sender VARCHAR(50) NOT NULL,
+    content TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+
+DROP TRIGGER IF EXISTS trg_conversations_updated_at ON conversations;
+CREATE TRIGGER trg_conversations_updated_at
+BEFORE UPDATE ON conversations
+FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+

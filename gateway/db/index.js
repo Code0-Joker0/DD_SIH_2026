@@ -126,6 +126,27 @@ async function provisionTables() {
         details JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- Conversations (Per-User Isolation)
+      CREATE TABLE IF NOT EXISTS conversations (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(255) DEFAULT 'New Inspection Analysis',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+
+      -- Messages
+      CREATE TABLE IF NOT EXISTS messages (
+        id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        conversation_id VARCHAR(255) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        sender VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE messages ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
     `);
 
     // 3. Seed default inspector profile if users table is completely empty

@@ -472,6 +472,30 @@ export async function executeAgentTask(taskPrompt, file = null) {
   return blob;
 }
 
+/**
+ * 15. Fetch User Conversations
+ */
+export async function fetchConversations() {
+  const res = await authFetch('/api/chat/conversations');
+  if (!res.ok) {
+    throw new Error(`Failed to fetch conversations with status ${res.status}`);
+  }
+  const data = await res.json();
+  return data.conversations || [];
+}
+
+/**
+ * 16. Fetch Messages for a specific conversation
+ */
+export async function fetchConversationMessages(conversationId) {
+  const res = await authFetch(`/api/chat/conversations/${conversationId}/messages`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch messages with status ${res.status}`);
+  }
+  const data = await res.json();
+  return data.messages || [];
+}
+
 export default {
   getToken,
   setToken,
@@ -494,4 +518,6 @@ export default {
   sendChatMessage,
   uploadRAGDocument,
   executeAgentTask,
+  fetchConversations,
+  fetchConversationMessages,
 };

@@ -6,10 +6,10 @@ export default function LoginCard({ onLoginSuccess }) {
   const { login, register } = useAuth();
 
   const [isRegisterMode, setIsRegisterMode] = useState(false);
-  const [email, setEmail] = useState('engineer@mrpl.co.in');
-  const [password, setPassword] = useState('SecurePassword2026!');
-  const [username, setUsername] = useState('lead_engineer');
-  const [fullName, setFullName] = useState('Lead Inspector Gopal');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('engineer');
   const [department, setDepartment] = useState('Asset Integrity & Inspection');
 
@@ -27,8 +27,8 @@ export default function LoginCard({ onLoginSuccess }) {
       setRole('engineer');
       setDepartment('Asset Integrity & Inspection');
     } else {
-      setEmail('engineer@mrpl.co.in');
-      setPassword('SecurePassword2026!');
+      setEmail('');
+      setPassword('');
     }
   };
 
@@ -234,7 +234,7 @@ export default function LoginCard({ onLoginSuccess }) {
             />
             <input
               type="email"
-              placeholder="Enterprise Email"
+              placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -260,7 +260,7 @@ export default function LoginCard({ onLoginSuccess }) {
             />
             <input
               type="password"
-              placeholder="Master Password"
+              placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -285,7 +285,7 @@ export default function LoginCard({ onLoginSuccess }) {
               width: '100%',
               padding: '0.75rem',
               borderRadius: '8px',
-              backgroundColor: '#0EA5E9',
+              backgroundColor: '#D9A72E',
               color: '#0F172A',
               fontWeight: 700,
               fontSize: '0.92rem',
