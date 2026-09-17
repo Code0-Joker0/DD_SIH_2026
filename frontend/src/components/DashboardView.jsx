@@ -449,8 +449,13 @@ export default function DashboardView() {
       {/* Top Header Bar */}
       <header className="dash-topbar">
         <div className="dash-brand-new">
-          <div className="dash-brand-icon-new">
-            <Shield size={18} strokeWidth={2.2} />
+          <div className="floating-hero-logo-box">
+            <img
+              src="/assets/singularity_logo.png"
+              alt="Singularity AI"
+              className="h-8 w-auto max-h-[32px] object-contain"
+              style={{ maxHeight: '32px', width: 'auto' }}
+            />
           </div>
           <div className="dash-brand-text">
             <span className="brand-primary font-bold">SINGULARITY</span>
