@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(100) NOT NULL,
     role VARCHAR(50) NOT NULL DEFAULT 'employee' 
-        CHECK (role IN ('admin', 'manager', 'engineer', 'employee', 'auditor')),
+        CHECK (role IN ('admin', 'manager', 'engineer', 'employee', 'auditor', 'lead_inspector')),
     department VARCHAR(100) NOT NULL DEFAULT 'Engineering',
     status VARCHAR(20) NOT NULL DEFAULT 'active' 
         CHECK (status IN ('active', 'inactive', 'suspended')),
