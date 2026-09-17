@@ -67,8 +67,11 @@ import re
 import requests
 from typing import Optional, List, Dict, Any
 
-# Ensure project root is in sys.path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Ensure project root and backend directory are in sys.path
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(backend_dir, ".."))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -89,7 +92,10 @@ from backend.tools import OUTPUTS_DIR
 from backend.sandbox import execute_in_sandbox, verify_code_safety
 
 # RAG Pipeline Service
-from app.rag.rag_service import RAGService
+try:
+    from backend.app.rag.rag_service import RAGService
+except Exception:
+    RAGService = None
 
 # ------------------------------------------------------------------------------
 # 1. Environment & Config Variables
@@ -194,16 +200,22 @@ class SessionMemoryManager:
 session_db = SessionMemoryManager(DATABASE_URL)
 
 # Initialize RAG Engine
-rag_service = RAGService()
+rag_service = RAGService() if RAGService is not None else None
 
 # ------------------------------------------------------------------------------
 # 3. Dynamic Auto-Routing Helper
 # ------------------------------------------------------------------------------
-def select_optimal_model(query: str, sources_count: int = 0, doc_context_len: int = 0) -> str:
+def select_optimal_model(query: str, sources_count: int = 0, doc_context_len: int = 0, has_images: bool = False) -> str:
     """
-    Intelligent Auto-Router choosing the best local model based on intent and context density.
+    Intelligent Auto-Router choosing the best local model based on intent, modality, and context density.
     """
+    # 0. If images are attached or query asks for visual/schematic/diagram analysis -> qwen2.5vl:3b
+    if has_images:
+        return "qwen2.5vl:3b"
+
     q = query.lower()
+    if any(k in q for k in ["image", "photo", "p&id", "pid", "schematic", "diagram", "drawing", "visual", "blueprint"]):
+        return "qwen2.5vl:3b"
 
     # 1. Math, remaining life equations, corrosion rate -> deepseek-r1:7b
     calc_keywords = [
@@ -261,6 +273,7 @@ class ChatRequest(BaseModel):
     history: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
     document_context: Optional[str] = None
     model_name: Optional[str] = "auto"
+    images: Optional[List[str]] = Field(default_factory=list)
 
 class ChatResponse(BaseModel):
     response: str
@@ -470,7 +483,8 @@ async def chat_endpoint(payload: ChatRequest):
         resolved_model = select_optimal_model(
             query=message,
             sources_count=len(sources),
-            doc_context_len=len(combined_doc_context)
+            doc_context_len=len(combined_doc_context),
+            has_images=bool(payload.images and len(payload.images) > 0)
         )
     else:
         resolved_model = requested_model
@@ -481,7 +495,8 @@ async def chat_endpoint(payload: ChatRequest):
             history=history,
             selected_doc_ids=selected_doc_ids,
             document_context=combined_doc_context,
-            model_name=resolved_model
+            model_name=resolved_model,
+            images_b64=payload.images if payload.images else None
         )
 
         if not reply or "unable to provide" in reply.lower() or "without access to" in reply.lower():
@@ -512,6 +527,150 @@ async def chat_endpoint(payload: ChatRequest):
         sources=sources,
         resolved_model=resolved_model
     )
+
+# Multi-Modal Ingestion & Context Grounded Extraction - POST /api/analyze/multi-modal
+@app.post("/api/analyze/multi-modal")
+async def analyze_multimodal_endpoint(
+    prompt: Optional[str] = Form(None),
+    message: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    model_name: Optional[str] = Form("auto"),
+    selected_doc_ids: Optional[str] = Form(None),
+    history: Optional[str] = Form(None),
+    documents: List[UploadFile] = File(default=[]),
+    images: List[UploadFile] = File(default=[])
+):
+    """
+    Simultaneously ingests multiple documents (PDF, DOCX, TXT, CSV) and inspection images,
+    extracts contextual text into bounded blocks, and executes sovereign multimodal LLM inference.
+    """
+    query_text = (prompt or message or "").strip()
+    if not query_text:
+        query_text = "Perform comprehensive multi-modal inspection analysis cross-referencing attached documents and images."
+
+    sid = session_id or str(uuid.uuid4())
+    req_model = (model_name or "auto").strip().lower()
+
+    # Parse history if stringified JSON
+    hist_list = []
+    if history:
+        try:
+            hist_list = json.loads(history) if isinstance(history, str) else history
+        except Exception:
+            pass
+
+    # Parse selected_doc_ids
+    doc_ids_list = []
+    if selected_doc_ids:
+        try:
+            doc_ids_list = json.loads(selected_doc_ids) if isinstance(selected_doc_ids, str) else selected_doc_ids
+        except Exception:
+            pass
+
+    # 1. Parse all incoming documents by MIME / extension
+    extracted_docs_text = []
+    processed_documents = []
+    for doc_file in documents:
+        if not doc_file or not doc_file.filename:
+            continue
+        try:
+            doc_bytes = await doc_file.read()
+            text_extracted, _, _ = extract_document_content(
+                file_bytes=doc_bytes,
+                filename=doc_file.filename
+            )
+            content_str = (text_extracted or "").strip()
+            bounded_text = f"--- BEGIN DOCUMENT: {doc_file.filename} ---\n{content_str}\n--- END DOCUMENT ---"
+            extracted_docs_text.append(bounded_text)
+            processed_documents.append({
+                "filename": doc_file.filename,
+                "size": len(doc_bytes),
+                "extracted_chars": len(content_str)
+            })
+        except Exception as doc_err:
+            print(f"[Multi-Modal Doc Parsing Error]: {doc_file.filename}: {doc_err}")
+
+    # 2. Ingest and Base64-encode inspection images
+    processed_images = []
+    images_base64 = []
+    for img_file in images:
+        if not img_file or not img_file.filename:
+            continue
+        try:
+            img_bytes = await img_file.read()
+            _, b64_str, _ = extract_document_content(
+                file_bytes=img_bytes,
+                filename=img_file.filename
+            )
+            if b64_str:
+                images_base64.append(b64_str)
+            processed_images.append({
+                "filename": img_file.filename,
+                "size": len(img_bytes)
+            })
+        except Exception as img_err:
+            print(f"[Multi-Modal Image Parsing Error]: {img_file.filename}: {img_err}")
+
+    # Aggregated document context
+    combined_doc_context = "\n\n".join(extracted_docs_text)
+
+    # 3. Retrieve RAG context if applicable
+    sources = []
+    rag_context = ""
+    try:
+        rag_res = rag_service.generate_response(query=query_text, history=hist_list)
+        sources = rag_res.get("sources", [])
+        if sources:
+            rag_context = "\n\n".join([f"[{s.get('source')}]: {s.get('text')}" for s in sources])
+    except Exception as rag_err:
+        print(f"[RAG Retrieval Warning in Multi-Modal]: {rag_err}")
+
+    if rag_context:
+        combined_doc_context = f"{combined_doc_context}\n\n[RETRIEVED STATUTORY REPOSITORY CONTEXT]\n{rag_context}".strip()
+
+    # 4. Optimal model routing
+    if req_model == "auto":
+        resolved_model = select_optimal_model(
+            query=query_text,
+            sources_count=len(sources) + len(processed_documents),
+            doc_context_len=len(combined_doc_context),
+            has_images=bool(images_base64 and len(images_base64) > 0)
+        )
+    else:
+        resolved_model = req_model
+
+    session_db.add_message(sid, "user", query_text)
+
+    # 5. Execute Multi-Modal Reasoning
+    try:
+        reply = chat_agent_reason(
+            message=query_text,
+            history=hist_list,
+            selected_doc_ids=doc_ids_list,
+            document_context=combined_doc_context,
+            model_name=resolved_model,
+            images_b64=images_base64
+        )
+    except Exception as exec_err:
+        import traceback
+        print(f"[Multi-Modal Agent Error with {resolved_model}]:\n{traceback.format_exc()}")
+        reply = f"⚠️ **Inference Error**: Failed to complete visual/document inference on `{resolved_model}`: {str(exec_err)}."
+
+    if reply and "<think>" in reply and "</think>" in reply:
+        reply = re.sub(r"<think>.*?</think>", "", reply, flags=re.DOTALL).strip()
+
+    session_db.add_message(sid, "assistant", reply)
+
+    return {
+        "status": "success",
+        "analysis": reply,
+        "response": reply,
+        "session_id": sid,
+        "processed_documents": processed_documents,
+        "processed_images": processed_images,
+        "sources": sources,
+        "resolved_model": resolved_model
+    }
 
 # Tier 2 Secure Sandbox Code Execution - POST /api/sandbox/execute
 @app.post("/api/sandbox/execute", response_model=SandboxExecResponse)

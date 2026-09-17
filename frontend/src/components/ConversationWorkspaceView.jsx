@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Paperclip,
-  Play,
   ChevronDown,
   FileText,
   FileSpreadsheet,
@@ -13,8 +12,7 @@ import {
   AlertCircle,
   Sparkles,
   Info,
-  ArrowUp,
-  Loader2
+  ArrowUp
 } from 'lucide-react';
 import { INITIAL_SOURCE_FILES } from '../data/chatStore';
 import { executeAgentTask, fetchModels } from '../utils/api';
@@ -30,22 +28,22 @@ const SUGGESTION_CHIPS = [
 ];
 
 const DEFAULT_MODELS = [
-  { id: 'auto', label: 'Auto (Recommended)', tag: 'Adaptive', icon: '✨', desc: 'Auto-evaluates query intent and routes to optimal sovereign model' },
-  { id: 'llama3.2:3b', label: 'Llama 3.2 (3B)', tag: 'Fast', icon: '⚡', desc: 'Ultra-fast low-latency sovereign engine for quick conversational QA' },
+  { id: 'auto', label: 'Auto (Recommended)', tag: 'Adaptive', icon: '✨', desc: 'Auto-evaluates query intent and routes to optimal Singularity model' },
+  { id: 'llama3.2:3b', label: 'Llama 3.2 (3B)', tag: 'Fast', icon: '⚡', desc: 'Ultra-fast low-latency Singularity engine for quick conversational QA' },
   { id: 'qwen2.5:7b', label: 'Qwen 2.5 (7B)', tag: 'Technical QA', icon: '🔍', desc: 'Deep statutory synthesis (API 570/510, ASME, OISD-118)' },
   { id: 'llama3.1:8b', label: 'Llama 3.1 (8B)', tag: 'Agent & Tools', icon: '🛠️', desc: 'Multi-turn agent reasoning, tool execution, and document synthesis' },
   { id: 'deepseek-r1:7b', label: 'DeepSeek-R1 (7B)', tag: 'Calculations', icon: '🧠', desc: 'Reasoning engine for corrosion rates, wall loss % & remaining life math' }
 ];
 
 const MODEL_LABEL_MAP = {
-  'auto': { label: 'Auto (Recommended)', tag: 'Adaptive', icon: '✨', desc: 'Auto-evaluates query intent and routes to optimal sovereign model' },
-  'llama3.2:3b': { label: 'Llama 3.2 (3B)', tag: 'Fast', icon: '⚡', desc: 'Ultra-fast low-latency sovereign engine for quick conversational QA' },
+  'auto': { label: 'Auto (Recommended)', tag: 'Adaptive', icon: '✨', desc: 'Auto-evaluates query intent and routes to optimal Singularity model' },
+  'llama3.2:3b': { label: 'Llama 3.2 (3B)', tag: 'Fast', icon: '⚡', desc: 'Ultra-fast low-latency Singularity engine for quick conversational QA' },
   'qwen2.5:7b': { label: 'Qwen 2.5 (7B)', tag: 'Technical QA', icon: '🔍', desc: 'Deep statutory synthesis (API 570/510, ASME, OISD-118)' },
   'llama3.1:8b': { label: 'Llama 3.1 (8B)', tag: 'Agent & Tools', icon: '🛠️', desc: 'Multi-turn agent reasoning, tool execution, and document synthesis' },
   'deepseek-r1:7b': { label: 'DeepSeek-R1 (7B)', tag: 'Calculations', icon: '🧠', desc: 'Reasoning engine for corrosion rates, wall loss % & remaining life math' }
 };
 
-const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.webp'];
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.pptx', '.png', '.jpg', '.jpeg', '.webp', '.txt', '.csv', '.bmp'];
 
 export default function ConversationWorkspaceView({ activeChat, onSendMessage }) {
   const [promptInput, setPromptInput] = useState('');
@@ -80,7 +78,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
               label: meta?.label || (typeof m === 'object' && m.label ? m.label : modelId),
               tag: meta?.tag || 'Local',
               icon: meta?.icon || '🤖',
-              desc: meta?.desc || `Sovereign ${modelId} inference model`
+              desc: meta?.desc || `Singularity ${modelId} inference model`
             };
           });
           setAvailableModels(mapped);
@@ -139,13 +137,16 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
     Array.from(files).forEach((file) => {
       const ext = '.' + file.name.split('.').pop().toLowerCase();
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
-        setFileError(`Format '${ext}' unsupported. Allowed: PDF, DOCX, XLSX, PPTX, Images.`);
+        setFileError(`Format '${ext}' unsupported. Allowed: PDF, DOCX, TXT, CSV, Images, XLSX.`);
       } else {
         const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
         newFiles.push({
           name: file.name,
           size: `${sizeMb > 0 ? sizeMb : '0.8'} MB`,
-          status: 'Ready'
+          status: 'Ready',
+          rawFile: file,
+          file: file,
+          type: ext
         });
       }
     });
@@ -278,7 +279,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
               ref={fileInputRef}
               style={{ display: 'none' }}
               multiple
-              accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.webp"
+              accept=".pdf,.docx,.txt,.csv,.png,.jpg,.jpeg,.bmp,.xlsx,.pptx,.webp"
               onChange={handleFileChange}
             />
 
@@ -301,7 +302,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
             <div className="model-picker-wrapper">
               <button
                 type="button"
-                className="model-picker-trigger font-mono"
+                className={`model-picker-trigger font-mono ${isModelPickerOpen ? 'open' : ''}`}
                 onClick={() => setIsModelPickerOpen(!isModelPickerOpen)}
                 title="Select Local AI Inference Engine"
               >
@@ -313,7 +314,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
               {isModelPickerOpen && (
                 <div className="model-picker-menu animate-fade-in font-sans">
                   <div className="model-picker-header font-mono">
-                    <span>Sovereign Local Engine</span>
+                    <span>Singularity Local Engine</span>
                   </div>
                   {availableModels.map((model) => {
                     const isSelected = selectedModel === model.id;
@@ -473,7 +474,7 @@ export default function ConversationWorkspaceView({ activeChat, onSendMessage })
                         <div className="flex flex-col gap-0.5">
                           <span className="font-semibold text-amber-300">
                             {selectedModel === 'auto'
-                              ? 'Evaluating intent & routing to optimal sovereign model...'
+                              ? 'Evaluating intent & routing to optimal Singularity model...'
                               : `Allocating weights for ${selectedModel}...`}
                           </span>
                           <span className="text-[11px] text-slate-400">

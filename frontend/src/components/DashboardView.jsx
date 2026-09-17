@@ -109,7 +109,7 @@ export default function DashboardView() {
       >
         <Loader2 className="animate-spin text-cyan-400" size={32} style={{ color: '#38BDF8' }} />
         <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', letterSpacing: '0.08em', color: '#94A3B8' }}>
-          INITIALIZING SOVEREIGN WORKBENCH...
+          INITIALIZING SINGULARITY WORKBENCH...
         </span>
       </div>
     );
@@ -132,7 +132,7 @@ export default function DashboardView() {
               <Shield size={18} strokeWidth={2.2} />
             </div>
             <div className="dash-brand-text">
-              <span className="brand-primary font-bold">SOVEREIGN AI</span>
+              <span className="brand-primary font-bold">Singularity</span>
               <span className="brand-secondary font-sans">WorkBench</span>
             </div>
           </div>
@@ -263,10 +263,17 @@ export default function DashboardView() {
       }
 
       const docIds = currentChat?.selectedSourceDocumentIds || [];
-      const data = await sendChatMessage(prompt, targetChatId, docIds, selectedModel);
+      const data = await sendChatMessage(
+        prompt,
+        targetChatId,
+        docIds,
+        selectedModel,
+        attachedFiles,
+        currentChat?.title || 'Inspection Session'
+      );
 
       const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(2);
-      const answerText = data.response || data.message || data.text || (typeof data === 'string' ? data : JSON.stringify(data));
+      const answerText = data.analysis || data.response || data.message || data.text || (typeof data === 'string' ? data : JSON.stringify(data));
       const resolvedModel = data.resolved_model || data.model || selectedModel;
       const sourceList = Array.isArray(data.sources) && data.sources.length > 0
         ? data.sources.map(s => typeof s === 'string' ? s : s.filename || s.title || 'Referenced Document')
@@ -297,7 +304,7 @@ export default function DashboardView() {
                       {
                         num: '01',
                         title: 'Telemetry & Verification Status',
-                        desc: `Query verified against local sovereign knowledge base using ${resolvedModel}.`
+                        desc: `Query verified against local Singularity's knowledge base using ${resolvedModel}.`
                       }
                     ],
                     recommendation: data.recommendation || 'Save output note or export findings to task records.',
@@ -446,7 +453,7 @@ export default function DashboardView() {
             <Shield size={18} strokeWidth={2.2} />
           </div>
           <div className="dash-brand-text">
-            <span className="brand-primary font-bold">SOVEREIGN AI</span>
+            <span className="brand-primary font-bold">SINGULARITY</span>
             <span className="brand-secondary font-sans">WorkBench</span>
           </div>
         </div>

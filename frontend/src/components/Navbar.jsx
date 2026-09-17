@@ -9,9 +9,9 @@ export default function Navbar({ onOpenSupport }) {
     <header className="navbar">
       <div className="brand-section">
         <div className="brand-icon-box">
-          <Shield size={18} strokeWidth={2.2} />
+          <img src="/assets/singularity_logo.png" alt="Singularity AI" className="brand-logo-img" />
         </div>
-        <span className="brand-title">Sovereign AI Workbench</span>
+        <span className="brand-title">Singularity AI Workbench</span>
         <span className="version-pill">AIR-GAPPED v2.4</span>
       </div>
       

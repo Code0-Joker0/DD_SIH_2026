@@ -70,3 +70,4 @@ test_doc.txt
 
 gateway/data/pglite/
 *.wasm
+frontend_staging/

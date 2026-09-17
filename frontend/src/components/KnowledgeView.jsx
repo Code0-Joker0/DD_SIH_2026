@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   BookOpen, 
   Search, 
@@ -20,7 +20,7 @@ import {
   Check
 } from 'lucide-react';
 import { INITIAL_CHAT_UPLOADS, INITIAL_SOURCE_FILES } from '../data/chatStore';
-import { uploadRAGDocument } from '../utils/api';
+import { uploadRAGDocument, getCompanyFiles } from '../utils/api';
 
 export default function KnowledgeView({ onSelectForTask }) {
   const [activeTab, setActiveTab] = useState('source'); // 'chat' | 'source'
@@ -42,6 +42,76 @@ export default function KnowledgeView({ onSelectForTask }) {
   
   // Toast notification
   const [toastMessage, setToastMessage] = useState('');
+
+  const loadVaultFiles = async () => {
+    try {
+      const res = await getCompanyFiles();
+      if (res && Array.isArray(res.files)) {
+        const chatItems = [];
+        const sourceItems = [];
+
+        res.files.forEach((file) => {
+          const isChat = file.source === 'chat_upload' || file.metadata?.source === 'chat_upload';
+          if (isChat) {
+            chatItems.push({
+              id: file.id,
+              name: file.name,
+              type: file.type || 'Document',
+              chatTitle: file.chatTitle || file.metadata?.chatTitle || 'Inspection Session',
+              uploadDate: file.date || 'Just now',
+              status: file.status || 'Verified',
+              accessScope: 'Confidential',
+              fileSize: file.size,
+              category: file.type
+            });
+          }
+          sourceItems.push({
+            id: file.id,
+            name: file.name,
+            department: file.department || 'General Operations',
+            version: 'v1.0',
+            accessPermissions: 'All Engineering',
+            status: file.status || 'Verified',
+            indexedStatus: 'Indexed in Vault',
+            lastUpdated: file.date || 'Recently',
+            fileSize: file.size,
+            category: file.type || 'Document'
+          });
+        });
+
+        if (chatItems.length > 0) {
+          setChatUploads((prev) => {
+            const names = new Set(chatItems.map((c) => c.name));
+            const existing = prev.filter((p) => !names.has(p.name));
+            return [...chatItems, ...existing];
+          });
+        }
+
+        if (sourceItems.length > 0) {
+          setSourceFiles((prev) => {
+            const names = new Set(sourceItems.map((s) => s.name));
+            const existing = prev.filter((p) => !names.has(p.name));
+            return [...sourceItems, ...existing];
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[KnowledgeView failed to load live vault files]:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadVaultFiles();
+
+    const handleVaultUpdated = () => {
+      loadVaultFiles();
+    };
+
+    window.addEventListener('knowledge-vault-updated', handleVaultUpdated);
+    return () => {
+      window.removeEventListener('knowledge-vault-updated', handleVaultUpdated);
+    };
+  }, []);
 
   const showToast = (msg) => {
     setToastMessage(msg);

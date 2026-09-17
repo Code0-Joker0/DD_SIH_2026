@@ -12,7 +12,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# Third-party PDF and Image parsing libraries
+# Third-party PDF, DOCX, and Image parsing libraries
 try:
     import pdfplumber
 except ImportError:
@@ -22,6 +22,13 @@ try:
     import pypdf
 except ImportError:
     pypdf = None
+
+try:
+    import docx
+    from docx import Document
+except ImportError:
+    docx = None
+    Document = None
 
 from PIL import Image
 
@@ -77,15 +84,18 @@ def safe_ollama_chat(model: str, messages: List[Dict[str, Any]], timeout: float 
         return None
 
 
-# 2. Document Ingestion Engine (PDF / Image / Scanned OCR)
+# 2. Document Ingestion Engine (PDF / Image / DOCX / TXT / CSV)
 def extract_document_content(
     file_path: Optional[str] = None,
     file_bytes: Optional[bytes] = None,
-    image_b64: Optional[str] = None
+    image_b64: Optional[str] = None,
+    filename: Optional[str] = None
 ) -> Tuple[Optional[str], Optional[str], str]:
     """
-    Dynamically ingests uploaded file formats (PDF, PNG, JPG, JPEG, WEBP, DOCX, TXT):
-    - For PDF: Extracts text using pdfplumber/pypdf. If scanned (no text), renders Page 1 to image.
+    Dynamically ingests uploaded file formats (PDF, PNG, JPG, JPEG, WEBP, BMP, DOCX, TXT, CSV, JSON):
+    - For PDF: Extracts text using pdfplumber/pypdf across all pages.
+    - For DOCX: Extracts paragraphs and table contents.
+    - For TXT/CSV/JSON: Decodes UTF-8 buffers.
     - For Image: Converts/encodes directly to base64 JPEG for multimodal processing.
     
     Returns:
@@ -95,21 +105,44 @@ def extract_document_content(
     extracted_b64: Optional[str] = image_b64
     file_type = "text"
 
+    fn = (filename or (os.path.basename(file_path) if file_path else "")).lower()
+
     if file_bytes and not file_path:
-        if file_bytes.startswith(b"%PDF"):
+        if file_bytes.startswith(b"%PDF") or fn.endswith(".pdf"):
             file_type = "pdf"
             try:
-                if pdfplumber:
+                if pypdf:
+                    reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+                    p_texts = [p.extract_text() or "" for p in reader.pages]
+                    doc_text = "\n".join(p_texts).strip()
+            except Exception:
+                pass
+            if not doc_text and pdfplumber:
+                try:
                     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                         pages_text = [p.extract_text() or "" for p in pdf.pages]
-                        combined = "\n".join(pages_text).strip()
-                        if len(combined) > 30:
-                            doc_text = combined
-                        elif len(pdf.pages) > 0:
-                            p0_img = pdf.pages[0].to_image(resolution=150).original
-                            buf = io.BytesIO()
-                            p0_img.save(buf, format="JPEG")
-                            extracted_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        doc_text = "\n".join(pages_text).strip()
+                except Exception:
+                    pass
+        elif fn.endswith(".docx") or fn.endswith(".doc"):
+            file_type = "docx"
+            try:
+                if Document:
+                    doc = Document(io.BytesIO(file_bytes))
+                    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                    table_texts = []
+                    for table in doc.tables:
+                        for row in table.rows:
+                            row_text = " | ".join([c.text.strip() for c in row.cells if c.text.strip()])
+                            if row_text:
+                                table_texts.append(row_text)
+                    doc_text = "\n".join(paragraphs + table_texts).strip()
+            except Exception as docx_err:
+                print(f"[DOCX Extraction Error]: {docx_err}")
+        elif any(fn.endswith(ext) for ext in [".txt", ".csv", ".json", ".xml", ".log", ".md"]):
+            file_type = "text"
+            try:
+                doc_text = file_bytes.decode("utf-8", errors="ignore").strip()
             except Exception:
                 pass
         else:
@@ -128,29 +161,37 @@ def extract_document_content(
         if lower_path.endswith(".pdf"):
             file_type = "pdf"
             pdf_text = ""
-            try:
-                if pdfplumber:
-                    with pdfplumber.open(file_path) as pdf:
-                        pages_text = [p.extract_text() or "" for p in pdf.pages]
-                        pdf_text = "\n".join(pages_text).strip()
-                        if len(pdf_text) < 30 and len(pdf.pages) > 0:
-                            p0_img = pdf.pages[0].to_image(resolution=150).original
-                            buf = io.BytesIO()
-                            p0_img.save(buf, format="JPEG")
-                            extracted_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            except Exception:
-                pass
-
-            if not pdf_text and pypdf:
+            if pypdf:
                 try:
                     reader = pypdf.PdfReader(file_path)
                     p_texts = [p.extract_text() or "" for p in reader.pages]
                     pdf_text = "\n".join(p_texts).strip()
                 except Exception:
                     pass
+            if not pdf_text and pdfplumber:
+                try:
+                    with pdfplumber.open(file_path) as pdf:
+                        pages_text = [p.extract_text() or "" for p in pdf.pages]
+                        pdf_text = "\n".join(pages_text).strip()
+                except Exception:
+                    pass
+            doc_text = pdf_text
 
-            if len(pdf_text) >= 30:
-                doc_text = pdf_text
+        elif lower_path.endswith(".docx") or lower_path.endswith(".doc"):
+            file_type = "docx"
+            try:
+                if Document:
+                    doc = Document(file_path)
+                    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                    table_texts = []
+                    for table in doc.tables:
+                        for row in table.rows:
+                            row_text = " | ".join([c.text.strip() for c in row.cells if c.text.strip()])
+                            if row_text:
+                                table_texts.append(row_text)
+                    doc_text = "\n".join(paragraphs + table_texts).strip()
+            except Exception as docx_err:
+                print(f"[DOCX Extraction Error]: {docx_err}")
 
         elif any(lower_path.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]):
             file_type = "image"
@@ -162,7 +203,7 @@ def extract_document_content(
             except Exception:
                 with open(file_path, "rb") as f:
                     extracted_b64 = base64.b64encode(f.read()).decode("utf-8")
-        elif lower_path.endswith(".txt") or lower_path.endswith(".csv"):
+        elif any(lower_path.endswith(ext) for ext in [".txt", ".csv", ".json", ".xml", ".log", ".md"]):
             file_type = "text"
             try:
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -602,18 +643,56 @@ def run_pipeline(
         "status": state.get("status", "VERIFIED_AND_COMPLETE")
     }
 
-# Interactive Chat Reasoning
+# ------------------------------------------------------------------------------
+# System Vision Categorization Prompt
+# ------------------------------------------------------------------------------
+SYSTEM_VISION_PROMPT = """You are an expert refinery engineer, technical draftsman, and asset integrity specialist.
+When analyzing any provided image, first categorize the visual format into one of the following:
+
+1. ENGINEERING SCHEMATICS & DIAGRAMS (P&ID, PFD, Isometrics, CAD, Blueprints, Flowcharts):
+   - Transcribe and summarize key metadata from title blocks: Project, Unit, Drawing Title, Drawing Number, and Revision Date.
+   - Trace equipment flow and loops (e.g., distillation columns, heat exchangers, drums, pumps).
+   - Identify line designations, process streams, control loops, valves, and transmitter tags (e.g., PT, TT, LT, PCV, LCV).
+   - DO NOT fabricate or report physical corrosion, metal thinning, or NDT degradation unless such data is explicitly labeled in textual callout notes on the schematic.
+
+2. FIELD INSPECTION & NDT PHOTOGRAPHS (Visual Inspection, Ultrasonic Scans, Radiography, Thermography):
+   - Assess physical condition: surface pitting, scaling, wall loss, weld defects, cracks, thermal anomalies, or structural damage.
+   - Reference applicable industrial integrity standards (e.g., API 510, API 570, ASME B31.3) relevant to the observed component.
+
+Deliver a precise, factual breakdown based solely on the visual contents."""
+
 # Interactive Chat Reasoning
 def chat_agent_reason(
     message: str,
     history: Optional[List[Dict[str, Any]]] = None,
     selected_doc_ids: Optional[List[str]] = None,
     document_context: Optional[str] = None,
-    model_name: Optional[str] = "llama3.2:3b"
+    model_name: Optional[str] = "llama3.2:3b",
+    images_b64: Optional[List[str]] = None
 ) -> str:
     """
-    Single-agent conversational reasoning with statutory RAG grounding and dynamic model selection.
+    Single-agent conversational reasoning with statutory RAG grounding, multi-modal vision support,
+    and dynamic model selection.
     """
+    has_images = bool(images_b64 and len(images_b64) > 0)
+
+    # Use vision system prompt when images are present, otherwise standard engineering copilot prompt
+    if has_images:
+        system_prompt = SYSTEM_VISION_PROMPT
+    else:
+        system_prompt = (
+            "You are the MRPL Asset Integrity AI Copilot, an expert advisor for petroleum refinery mechanical integrity, "
+            "NDT inspection evaluation, and statutory compliance (API 570, API 510, ASME Section VIII Div 1, OISD-STD-118).\n\n"
+            "OPERATING GUIDELINES:\n"
+            "1. Ground your answers directly in the active inspection document data and statutory engineering guidelines provided below.\n"
+            "2. When referring to wall thickness, degradation, retirement limits, or risk ratings, reference the exact values from the document.\n"
+            "3. Be concise, technically precise, authoritative, and helpful to the refinery inspection engineer.\n"
+            "4. Never hallucinate facts outside the inspection context or refinery standards."
+        )
+
+    if document_context:
+        system_prompt += f"\n\n[ACTIVE UPLOADED INSPECTION DOCUMENT CONTEXT]\n{document_context}"
+
     rag_context = ""
     try:
         search_query = message
@@ -623,25 +702,25 @@ def chat_agent_reason(
     except Exception:
         pass
 
-    system_prompt = (
-        "You are the MRPL Asset Integrity AI Copilot, an expert advisor for petroleum refinery mechanical integrity, "
-        "NDT inspection evaluation, and statutory compliance (API 570, API 510, ASME Section VIII Div 1, OISD-STD-118).\n\n"
-        "OPERATING GUIDELINES:\n"
-        "1. Ground your answers directly in the active inspection document data and statutory engineering guidelines provided below.\n"
-        "2. When referring to wall thickness, degradation, retirement limits, or risk ratings, reference the exact values from the document.\n"
-        "3. Be concise, technically precise, authoritative, and helpful to the refinery inspection engineer.\n"
-        "4. Never hallucinate facts outside the inspection context or refinery standards."
-    )
-
-    if document_context:
-        system_prompt += f"\n\n[ACTIVE UPLOADED INSPECTION DOCUMENT CONTEXT]\n{document_context}"
-
     if rag_context:
         system_prompt += f"\n\n[RELEVANT STATUTORY / ENGINEERING SOP GUIDELINES]\n{rag_context}"
 
     chosen_model = (model_name or "llama3.2:3b").strip().lower()
 
-    # Direct explicit client call to Ollama
+    # Route to local vision model if images are attached and current model is text-only
+    if has_images and chosen_model in ["llama3.2:3b", "llama3.1:8b", "deepseek-r1:7b", "auto", "qwen2.5:7b", "qwen2.5:14b"]:
+        chosen_model = "qwen2.5vl:3b"
+
+    # Clean raw base64 strings for Ollama
+    clean_images = []
+    if has_images:
+        for b64 in images_b64:
+            if "," in b64:
+                clean_images.append(b64.split(",")[-1])
+            else:
+                clean_images.append(b64)
+
+    # 1. Primary: Direct explicit client call to Ollama
     try:
         client = ollama.Client(host=VLLM_BASE_URL)
         ollama_messages = [{"role": "system", "content": system_prompt}]
@@ -651,7 +730,11 @@ def chat_agent_reason(
                 content = turn.get("content") or turn.get("text") or ""
                 if role in ["user", "assistant"] and content:
                     ollama_messages.append({"role": role, "content": content})
-        ollama_messages.append({"role": "user", "content": message})
+
+        user_turn = {"role": "user", "content": message}
+        if clean_images:
+            user_turn["images"] = clean_images
+        ollama_messages.append(user_turn)
 
         res = client.chat(
             model=chosen_model,
@@ -662,9 +745,10 @@ def chat_agent_reason(
         if reply:
             return reply
     except Exception as e:
-        print(f"[chat_agent_reason Explicit Error on model '{chosen_model}']: {e}")
+        import traceback
+        print(f"[chat_agent_reason Ollama Client Error on model '{chosen_model}']:\n{traceback.format_exc()}")
 
-    # Fallback to direct HTTP post if client object fails
+    # 2. Secondary: Direct HTTP POST to Ollama /api/chat
     try:
         import requests
         http_res = requests.post(
@@ -678,38 +762,21 @@ def chat_agent_reason(
             timeout=120
         )
         if http_res.status_code == 200:
-            return http_res.json().get("message", {}).get("content", "").strip()
+            content = http_res.json().get("message", {}).get("content", "").strip()
+            if content:
+                return content
     except Exception as http_err:
-        print(f"[Direct HTTP Fallback Failed]: {http_err}")
+        import traceback
+        print(f"[chat_agent_reason Direct HTTP Fallback Error on model '{chosen_model}']:\n{traceback.format_exc()}")
 
-    # Deterministic Grounded Reasoning Fallback (only if all local LLM engines fail)
-    tag_match = re.search(r"Tag\s*([A-Za-z0-9\-]+)|E-101|V-204|V-205|K-901", f"{document_context or ''} {message}")
-    tag_found = tag_match.group(0) if tag_match else "E-101"
-    
-    thick_match = re.search(r"(\d+\.\d+)\s*mm", f"{document_context or ''}")
-    thick_str = thick_match.group(0) if thick_match else "3.8 mm"
+    # Return explicit error payload rather than substituting false technical findings
+    if has_images:
+        return (
+            f"⚠️ **Vision Inference Error**: The local multi-modal vision engine (`{chosen_model}`) encountered an error during image processing.\n"
+            f"Please verify that Ollama is actively running with `{chosen_model}` available on `{VLLM_BASE_URL}`."
+        )
 
-    if "why" in message.lower() or "fail" in message.lower() or "status" in message.lower():
-        return (
-            f"### Integrity Assessment for {tag_found}\n\n"
-            f"Based on statutory standards (API 570 / API 510) and active inspection data:\n"
-            f"- **Measured Wall Thickness**: {thick_str}\n"
-            f"- **Statutory Retirement Limit**: 5.0 mm\n"
-            f"- **Status**: **CRITICAL FAIL** (Measured wall thickness is below the mandatory minimum retirement limit).\n\n"
-            f"The asset has experienced severe localized wall loss exceeding the allowable corrosion allowance limit."
-        )
-    elif "action" in message.lower() or "recommend" in message.lower():
-        return (
-            f"### Mandatory Statutory Action Plan for {tag_found}\n\n"
-            f"Per API 570 / OISD-STD-118 safety mandates:\n"
-            f"1. **Immediate Isolation**: Depressurize and isolate spool section {tag_found}.\n"
-            f"2. **Replacement Work Order**: Fabricate and install replacement spool in ASTM A106 Grade B carbon steel.\n"
-            f"3. **Formal Approval**: Issue signed MRPL Inter-Office Safety Approval Note.\n"
-            f"4. **NDT Verification**: Complete 100% radiographic examination and hydrostatic test prior to commissioning."
-        )
-    else:
-        return (
-            f"### MRPL Asset Integrity Response: {tag_found}\n\n"
-            f"Analysis completed for query: *'{message}'*.\n"
-            f"Equipment {tag_found} is tracked under API 570 / API 510 statutory inspection standards with measured thickness {thick_str}."
-        )
+    return (
+        f"⚠️ **Inference Engine Unreachable**: Could not complete reasoning on local model `{chosen_model}`. "
+        f"Please verify that the Ollama local AI engine is running."
+    )

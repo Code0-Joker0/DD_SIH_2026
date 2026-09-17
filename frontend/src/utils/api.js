@@ -309,17 +309,89 @@ export async function fetchModels() {
 }
 
 /**
- * 12. Interactive Copilot Chat with Gateway and Fallback
+ * 12. Interactive Multi-Modal Copilot Chat with Vault Sync & Gateway Fallback
  */
-export async function sendChatMessage(message, sessionId = 'default_session', selectedDocIds = [], modelName = 'auto') {
+export async function sendChatMessage(
+  message,
+  sessionId = 'default_session',
+  selectedDocIds = [],
+  modelName = 'auto',
+  attachedFiles = [],
+  chatTitle = 'Inspection Session'
+) {
+  const hasFiles = Array.isArray(attachedFiles) && attachedFiles.length > 0;
+
+  if (hasFiles) {
+    const formData = new FormData();
+    formData.append('message', message || '');
+    formData.append('prompt', message || '');
+    formData.append('session_id', sessionId || 'default_session');
+    formData.append('model_name', modelName || 'auto');
+    formData.append('chatTitle', chatTitle);
+    formData.append('selected_doc_ids', JSON.stringify(selectedDocIds || []));
+
+    attachedFiles.forEach((fileItem) => {
+      const fileObj = fileItem.rawFile || fileItem.file || (fileItem instanceof File ? fileItem : null);
+      if (fileObj && fileObj instanceof File) {
+        const isImg = fileObj.type.startsWith('image/') || /\.(png|jpg|jpeg|webp|bmp|gif|svg)$/i.test(fileObj.name);
+        if (isImg) {
+          formData.append('images', fileObj, fileObj.name);
+        } else {
+          formData.append('documents', fileObj, fileObj.name);
+        }
+      }
+    });
+
+    // 1. Primary: Post multi-part payload to Node API Gateway Vault Pipeline
+    try {
+      const gatewayRes = await authFetch('/api/chat/message', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (gatewayRes.ok) {
+        const data = await gatewayRes.json();
+        // Emit global event to immediately update Knowledge Base vault views without page reload
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('knowledge-vault-updated', { detail: { files: attachedFiles } }));
+        }
+        return data;
+      }
+    } catch (err) {
+      console.warn('[GATEWAY CHAT VAULT FAILED, TRYING DIRECT FASTAPI MULTI-MODAL]:', err.message);
+    }
+
+    // 2. Direct Fallback: Python FastAPI Multi-Modal Endpoint
+    try {
+      const pythonRes = await fetch(`${BACKEND_FALLBACK}/api/analyze/multi-modal`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (pythonRes.ok) {
+        const data = await pythonRes.json();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('knowledge-vault-updated', { detail: { files: attachedFiles } }));
+        }
+        return data;
+      }
+      const errData = await pythonRes.json().catch(() => ({}));
+      throw new Error(errData.detail || `Multi-modal engine failed with HTTP ${pythonRes.status}`);
+    } catch (directErr) {
+      throw new Error(`Direct inference engine failed: ${directErr.message}`);
+    }
+  }
+
+  // Pure JSON Text Chat Flow
   const payload = {
     session_id: sessionId,
     message,
     selected_doc_ids: selectedDocIds,
-    model_name: modelName || 'auto'
+    model_name: modelName || 'auto',
+    chatTitle
   };
 
-  // 1. Primary: Try Node API Gateway (passes auth header automatically)
+  // 1. Primary: Try Node API Gateway
   try {
     const gatewayRes = await authFetch('/api/chat', {
       method: 'POST',

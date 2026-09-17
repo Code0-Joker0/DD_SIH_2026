@@ -14,6 +14,7 @@ dotenv.config();
 import db from './db/index.js';
 import authRouter from './routes/auth.js';
 import filesRouter from './routes/files.js';
+import chatRouter from './routes/chat.js';
 
 const app = express();
 
@@ -28,9 +29,10 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// 4. Mount Enterprise Auth & Encrypted Vault Routes
+// 4. Mount Enterprise Auth, Encrypted Vault & Chat Routers
 app.use('/api/auth', authRouter);
 app.use('/api/files', filesRouter);
+app.use('/api/chat', chatRouter);
 
 // 5. Disk Storage for Temp Uploads
 const uploadDir = path.resolve('temp_uploads');
@@ -152,35 +154,7 @@ app.post('/api/rag/query', async (req, res) => {
     }
 });
 
-// 9. Interactive Copilot Chat: POST /api/chat -> FastAPI
-app.post('/api/chat', async (req, res) => {
-    try {
-        const { session_id, message, selected_doc_ids, history, document_context, model_name } = req.body;
 
-        if (!message || !message.trim()) {
-            return res.status(400).json({ error: 'Message cannot be empty' });
-        }
-
-        const response = await axios.post(`${FASTAPI_BASE_URL}/api/chat`, {
-            session_id: session_id || 'default_session',
-            message: message.trim(),
-            selected_doc_ids: selected_doc_ids || [],
-            history: history || [],
-            document_context: document_context || null,
-            model_name: model_name || 'auto'
-        }, {
-            timeout: 180000 // 3 minutes timeout for local model switches in VRAM
-        });
-
-        res.json(response.data);
-    } catch (err) {
-        const status = err.response ? err.response.status : 500;
-        res.status(status).json({
-            error: 'Chat completion failed',
-            details: err.response?.data || err.message
-        });
-    }
-});
 
 // 10. Full Agentic Task: POST /api/tasks/execute -> FastAPI (Streams back binary .docx)
 app.post('/api/tasks/execute', upload.single('file'), async (req, res) => {

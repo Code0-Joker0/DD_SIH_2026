@@ -1,6 +1,13 @@
 import React from 'react';
+import { useTheme } from '../context/useTheme';
 
 export default function LeftPanel() {
+  const { effectiveTheme } = useTheme();
+
+  const diagramSrc = effectiveTheme === 'light' 
+    ? '/assets/diagram_light.jpg' 
+    : '/assets/diagram.png';
+
   return (
     <section className="left-panel">
       <div className="left-content">
@@ -10,13 +17,13 @@ export default function LeftPanel() {
         </div>
 
         <h1 className="main-heading">
-          Sovereign AI Workbench
+          Singularity AI Workbench
         </h1>
 
         <div className="illustration-card">
           <img 
-            src="/assets/diagram.png" 
-            alt="Sovereign AI Workbench Architecture Diagram" 
+            src={diagramSrc} 
+            alt="Singularity AI Workbench Architecture Diagram" 
             className="diagram-image"
           />
         </div>

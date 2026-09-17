@@ -178,23 +178,35 @@ router.get('/', optionalAuth, async (req, res) => {
     }
 
     // Format response
-    const formattedFiles = files.map(f => ({
-      id: f.id,
-      name: f.original_name,
-      type: f.category,
-      mimeType: f.mime_type,
-      size: formatBytes(f.file_size),
-      rawSize: f.file_size,
-      encryptedSize: formatBytes(f.encrypted_size),
-      date: new Date(f.created_at).toLocaleDateString(undefined, {
-        month: 'short', day: 'numeric', year: 'numeric'
-      }),
-      createdAt: f.created_at,
-      status: f.status,
-      encryption: 'AES-256-GCM',
-      department: f.department,
-      uploader: f.uploader_name || 'Enterprise Personnel'
-    }));
+    const formattedFiles = files.map(f => {
+      let parsedMeta = {};
+      try {
+        parsedMeta = typeof f.metadata === 'string' ? JSON.parse(f.metadata || '{}') : (f.metadata || {});
+      } catch {
+        parsedMeta = {};
+      }
+
+      return {
+        id: f.id,
+        name: f.original_name,
+        type: f.category,
+        mimeType: f.mime_type,
+        size: formatBytes(f.file_size),
+        rawSize: f.file_size,
+        encryptedSize: formatBytes(f.encrypted_size),
+        date: new Date(f.created_at).toLocaleDateString(undefined, {
+          month: 'short', day: 'numeric', year: 'numeric'
+        }),
+        createdAt: f.created_at,
+        status: f.status,
+        encryption: 'AES-256-GCM',
+        department: f.department,
+        uploader: f.uploader_name || parsedMeta.uploadedByFullName || 'Enterprise Personnel',
+        metadata: parsedMeta,
+        source: parsedMeta.source || 'vault_upload',
+        chatTitle: parsedMeta.chatTitle || 'Inspection Session'
+      };
+    });
 
     return res.json({
       status: 'success',

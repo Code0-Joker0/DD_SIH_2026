@@ -1,4 +1,4 @@
-import { PGlite } from '@electric-sql/pglite';
+import pg from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -6,20 +6,18 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Target directory for the persistent embedded WASM PostgreSQL cluster
-const dbPath = process.env.PGLITE_DATA_DIR || path.join(__dirname, '../data/pglite');
+// Standard external PostgreSQL pool configuration (port 5432)
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/sih2026',
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
 
-// Ensure the storage directory exists on disk
-if (dbPath && dbPath !== ':memory:' && !dbPath.startsWith('idb://')) {
-  if (!fs.existsSync(dbPath)) {
-    fs.mkdirSync(dbPath, { recursive: true });
-  }
-}
-
-let pgliteInstance = null;
 let isPostgresConnected = false;
 let isInitialized = false;
 let initPromise = null;
@@ -33,10 +31,10 @@ export const inMemoryStore = {
 };
 
 /**
- * Provisions all essential tables, schemas, and indices in PGlite.
- * Runs once and is guarded by an initialization promise.
+ * Provisions essential enterprise tables, schemas, and indices in standard PostgreSQL.
+ * Runs once during startup and is guarded by an initialization promise.
  */
-async function provisionTables(db) {
+async function provisionTables() {
   if (isInitialized) return;
 
   try {
@@ -51,18 +49,21 @@ async function provisionTables(db) {
         const schemaSql = fs.readFileSync(schemaPath, 'utf8');
         if (schemaSql.trim()) {
           try {
-            await db.exec(schemaSql);
-            console.log(`✅ [PGLITE] Loaded external schema from: ${path.basename(schemaPath)}`);
+            await pool.query(schemaSql);
+            console.log(`✅ [POSTGRES] Loaded external schema from: ${path.basename(schemaPath)}`);
           } catch (execErr) {
-            console.warn(`⚠️ [PGLITE] Warning running ${path.basename(schemaPath)}:`, execErr.message);
+            console.warn(`⚠️ [POSTGRES] Notice parsing ${path.basename(schemaPath)}:`, execErr.message);
           }
         }
         break;
       }
     }
 
-    // 2. Ensure core enterprise tables exist
-    await db.exec(`
+    // 2. Ensure core enterprise tables and extensions exist
+    await pool.query(`
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
       -- Users Table (Engineers and Personnel)
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -127,14 +128,13 @@ async function provisionTables(db) {
       );
     `);
 
-    // 3. Seed default inspector profile if users table is empty
-    const checkCount = await db.query('SELECT COUNT(*) as count FROM users');
+    // 3. Seed default inspector profile if users table is completely empty
+    const checkCount = await pool.query('SELECT COUNT(*) as count FROM users');
     const totalUsers = parseInt(checkCount.rows[0]?.count || '0', 10);
 
     if (totalUsers === 0) {
-      // Default hash for 'SovereignPass2026!'
       const seedHash = '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi';
-      await db.query(`
+      await pool.query(`
         INSERT INTO users (username, email, password_hash, full_name, role, department)
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (email) DO NOTHING;
@@ -146,92 +146,95 @@ async function provisionTables(db) {
         'lead_inspector',
         'Asset Integrity & Inspection'
       ]);
-      console.log('✅ [PGLITE] Seeded default inspector account: engineer@mrpl.co.in');
+      console.log('✅ [POSTGRES] Seeded default inspector account: engineer@mrpl.co.in');
+    }
+
+    // 4. Auto-synchronize exported users dump if present
+    const exportPath = path.join(__dirname, '../data/exported_users.json');
+    if (fs.existsSync(exportPath)) {
+      try {
+        const raw = fs.readFileSync(exportPath, 'utf8');
+        const users = JSON.parse(raw);
+        for (const u of users) {
+          await pool.query(`
+            INSERT INTO users (id, username, email, password_hash, full_name, role, department, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (email) DO UPDATE SET
+              username = EXCLUDED.username,
+              password_hash = EXCLUDED.password_hash,
+              full_name = EXCLUDED.full_name,
+              role = EXCLUDED.role,
+              department = EXCLUDED.department,
+              status = EXCLUDED.status;
+          `, [
+            u.id || undefined,
+            u.username,
+            u.email,
+            u.password_hash,
+            u.full_name,
+            u.role || 'engineer',
+            u.department || 'Engineering',
+            u.status || 'active'
+          ]);
+        }
+        console.log(`✅ [POSTGRES] Auto-synced ${users.length} user(s) from exported_users.json`);
+      } catch (importErr) {
+        console.warn('[POSTGRES] User sync notice:', importErr.message);
+      }
     }
 
     isInitialized = true;
-    console.log('✅ [PGLITE] Sovereign enterprise tables, users, auth, and audit vault verified.');
+    console.log('✅ [POSTGRES] Enterprise tables, auth, and audit vault verified on external database.');
   } catch (err) {
-    console.error('❌ [PGLITE] Schema provisioning failure:', err.message);
+    console.error('❌ [POSTGRES] Schema provisioning failure:', err.message);
     throw err;
   }
 }
 
 /**
- * Returns or initializes the active singleton PGlite database instance.
- * Guarantees that tables are created before returning the instance.
+ * Returns the pool instance, ensuring provisioning has completed.
  */
 export async function getDb() {
-  if (!pgliteInstance) {
-    try {
-      pgliteInstance = new PGlite(dbPath);
-      await pgliteInstance.waitReady;
-      isPostgresConnected = true;
-      console.log(`✅ [PGLITE] Embedded PostgreSQL instance active at: ${dbPath}`);
-    } catch (err) {
-      isPostgresConnected = false;
-      console.error('❌ [PGLITE] Failed to launch embedded database:', err);
-      throw err;
-    }
-  }
-
-  // Ensure table provisioning is executed and awaited
   if (!isInitialized) {
     if (!initPromise) {
-      initPromise = provisionTables(pgliteInstance);
+      initPromise = provisionTables();
     }
     await initPromise;
   }
-
-  return pgliteInstance;
+  return pool;
 }
 
 /**
- * Executes a parameterized SQL query on the PGlite engine.
- * Output signature matches pg-pool contract: { rows: [...], rowCount: n, fields: [...] }
+ * Executes a parameterized SQL query on the PostgreSQL connection pool.
  */
 export const query = async (text, params = []) => {
   try {
-    const db = await getDb();
-    const result = await db.query(text, params);
+    await getDb();
+    const result = await pool.query(text, params);
     return {
       rows: result.rows || [],
-      rowCount: result.rows ? result.rows.length : 0,
+      rowCount: result.rowCount || 0,
       fields: result.fields || []
     };
   } catch (err) {
-    console.error('[PGLITE QUERY ERROR]:', err.message, '\nQuery:', text);
+    console.error('[POSTGRES QUERY ERROR]:', err.message, '\nQuery:', text);
     throw err;
   }
 };
 
 /**
- * Pool simulation interface maintaining drop-in compatibility with legacy code
- */
-export const pool = {
-  query: (text, params) => query(text, params),
-  connect: async () => {
-    const db = await getDb();
-    return {
-      query: (text, params) => query(text, params),
-      release: () => { }
-    };
-  }
-};
-
-/**
- * Verify PGlite connection and query execution
+ * Verifies external PostgreSQL connection
  */
 export const testConnection = async () => {
   try {
-    const res = await query('SELECT version() as ver, NOW() as current_time');
-    const versionStr = res.rows[0]?.ver || 'PGlite Embedded PostgreSQL WASM';
+    const res = await pool.query('SELECT version() as ver, NOW() as current_time');
+    const versionStr = res.rows[0]?.ver || 'PostgreSQL';
     isPostgresConnected = true;
-    console.log('✅ [PGLITE] Embedded PostgreSQL Connected successfully:', versionStr.split(',')[0]);
+    console.log('✅ [POSTGRES] External PostgreSQL Connected successfully:', versionStr.split(',')[0]);
     return true;
   } catch (error) {
     isPostgresConnected = false;
-    console.warn('⚠️ [PGLITE] Database unavailable:', error.message);
+    console.warn('⚠️ [POSTGRES] Database unavailable:', error.message);
     return false;
   }
 };
@@ -240,7 +243,7 @@ export const testConnection = async () => {
  * Explicit schema initialization export
  */
 export const initDatabase = async () => {
-  const db = await getDb();
+  await getDb();
   return isInitialized;
 };
 
