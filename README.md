@@ -285,8 +285,11 @@ python app.py
 ### Step 3: Launch the Frontend Cockpit
 
 ```bash
-cd ../frontend
+cd frontend
 npm install
+
+# Set up the environment variables (Configure VITE_API_BASE_URL for the backend)
+cp .env.example .env
 
 # Launch Vite development server (port 5173)
 npm run dev
